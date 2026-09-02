@@ -9,8 +9,10 @@ source and on PocketIC, see docs/TROUBLESHOOTING.md "Deep analysis"):
   compares the *most recently applied* name with every chain file name; the
   matching file is the chain position, the stored state is loaded as the chain
   type at that position and every later file runs. No match → the whole chain
-  runs from the genesis input `{}` → `RTS error: Memory-incompatible program
-  upgrade` (IC0503) on any populated canister. A stable field that is neither in
+   runs from the genesis input (first file's OldActor). A `{}` genesis traps
+   `RTS error: Memory-incompatible program upgrade` (IC0503) on a populated
+   Version 1.0.0 actor; genesis OldActor is the optional 37-field #340 shape
+   so those heaps adopt. A stable field that is neither in
   the loaded state nor produced by a migration that ran → `stable variable …
   not found in persisted state`.
 * Compile time (`mo_types/type.ml` `pre`/`post`, `mops check-stable` =
@@ -35,11 +37,13 @@ Caffeine reported for PR #311 reproduces locally only with that file in `.old`.
 
 Rules this script enforces (no replica, no PocketIC, no dfx):
 
-1. The genesis file is `20260801_000000.mo` with `OldActor = {}` so a fresh
-   canister installs, and it sorts before every recorded Caffeine name.
+1. The genesis file is `20260801_000000.mo`. OldActor field names equal
+   NewActor (optional adopt of the Caffeine #340 37-field actor so a canister
+   with no recorded migration name does not IC0503). Empty install still
+   works: every OldActor field is `?T`, missing → default.
 2. `NewActor` field sets for every file at or before `FROZEN_THROUGH` match
-   `snapshots/frozen-newactor-fields.json`. Name-only files (`20260803_185500`)
-   stay `migration(_ : {}) : {}`.
+   `snapshots/frozen-newactor-fields.json`. Name-only files (`20260803_185500`,
+   `20260826_000000`) stay `migration(_ : {}) : {}`.
 3. Actor-level `let`/`var` on `src/backend/main.mo` (not `transient`) must be
    on the latest field-introducing `NewActor` or in the frozen orthogonal
    allowlist. New names need a NEW later chain file (never edit a frozen one).
@@ -97,6 +101,7 @@ REQUIRED_DEPLOYED_SNAPSHOTS = (
     "caffeine-348-tail-20260803.most",
     "caffeine-354-tail-20260827.most",
     "pr259-tail-20260901.most",
+    "caffeine-340-legacy-no-chain.most",
 )
 
 ACTOR_FIELD = re.compile(r"^    (let|var) ([A-Za-z_][A-Za-z0-9_]*)\b")
@@ -323,11 +328,29 @@ def upgrade_verdict(
     held = set(most_stable_names(content))
     if not applied:
         if not held:
-            return []  # empty canister: whole chain runs from {}
-        return [
-            "no migration chain block but populated: the whole chain would run from "
-            f"the {{}} genesis and drop {sorted(held)} (Memory-incompatible program upgrade)"
-        ]
+            return []  # empty canister: k=0 ICStableRead of genesis OldActor (all optional → null)
+        # Version 1.0.0 / Caffeine #340: no chain names, populated heap.
+        # Runtime reads type_0 = first file's OldActor (optional 37-field adopt).
+        genesis_old = set(old_by_stem.get(stem(files[0]), [])) if files else set()
+        if not genesis_old:
+            return [
+                "no migration chain block but populated: genesis OldActor is {} so "
+                f"ICStableRead({{}}) would drop {sorted(held)} (Memory-incompatible program upgrade)"
+            ]
+        reasons = []
+        missing = sorted(genesis_old - held)
+        extra = sorted(held - genesis_old)
+        if missing:
+            reasons.append(
+                f"legacy no-chain actor lacks genesis OldActor fields {missing} "
+                "(not found in persisted state)"
+            )
+        if extra:
+            reasons.append(
+                f"legacy no-chain actor has extra fields {extra} vs genesis OldActor "
+                "(Memory-incompatible program upgrade)"
+            )
+        return reasons
     latest = max(applied)
     if latest not in chain_stems:
         return [
@@ -392,6 +415,12 @@ def check_baseline(path: Path, chain_stems: set[str], errors: list[str], *, labe
         errors.append(f"{label} {path} is not a moc .most signature")
         return
     if not applied:
+        ver = re.search(r"^// Version: ([^\n]+)", content, re.M)
+        # Version 1.0.0 populated snapshots (Caffeine #340) are adopted by
+        # genesis OldActor; upgrade_verdict checks the field set. Reject only
+        # a blank actor used as Caffeine's previous-version record.
+        if ver and ver.group(1).strip() == "1.0.0" and most_stable_names(content):
+            return
         errors.append(
             f"{label} {path} has no migration chain block (blank `actor {{ }};` or "
             "Version 1.0.0). It must be the signature Caffeine holds as previous "
@@ -427,13 +456,19 @@ def check() -> int:
     genesis_src = genesis.read_text(encoding="utf-8")
     try:
         old_fields = extract_old_actor_fields(genesis_src)
+        genesis_new = extract_new_actor_fields(genesis_src)
     except ValueError as exc:
         errors.append(f"{genesis.name}: {exc}")
         old_fields = ["<parse-error>"]
-    if old_fields:
+        genesis_new = []
+    # Empty `{}` still allowed. Optional-field adopt (same names as NewActor)
+    # is required for Version 1.0.0 / #340 canisters with no recorded chain name
+    # (Stralt_V2 ozvtz…): a `{}` type_0 traps IC0503 on that populated heap.
+    if old_fields and old_fields != genesis_new:
         errors.append(
-            f"{genesis.name} OldActor must be {{}} for empty-canister import "
-            f"(M0263); found {old_fields}"
+            f"{genesis.name} OldActor must be {{}} (empty install) or the same "
+            f"field names as NewActor (optional adopt of the #340 37-field actor); "
+            f"found OldActor {old_fields} vs NewActor {genesis_new}"
         )
 
     for name, where in DEPLOYED_TAILS.items():
@@ -448,7 +483,7 @@ def check() -> int:
     if limit < len(files):
         errors.append(
             f"mops.toml check-limit={limit} < chain length {len(files)}. "
-            f"Bump it so {GENESIS} (OldActor = {{}}) is not dropped."
+            f"Bump it so {GENESIS} (optional 37-field adopt) is not dropped."
         )
 
     frozen_expected = load_frozen()

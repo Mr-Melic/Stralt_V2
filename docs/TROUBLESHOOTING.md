@@ -228,7 +228,7 @@ moc 1.11.2 stores the full `.most` as the `icp:private motoko:stable-types` cust
 
 (b) Fresh reinstall when the canister only holds disposable test data: in Caffeine choose the reset / deploy-fresh option for the project (equivalent of `dfx canister install --mode reinstall`). Every stable map (`characterSlots`, `dokaBalances`, achievements, purchases, GameKey ledger, admin configs) is wiped and the whole chain runs from `20260801`. Local proof: `mops check-stable src/backend/migrations/snapshots/empty-canister.most backend`. This needs no upgrade path at all.
 
-Recommendation: import this branch first — it is built for the shape Caffeine's own check proves (the 2026-08-31 record), and also for the Caffeine #348/#354 tails and fresh #259–#311 installs. Fall back to (b) only if a readout shows one of the `snapshots/unsupported/` shapes and the data is expendable; otherwise bridge through the commit named in `snapshots/README.md`.
+Recommendation: import this branch first — it is built for the shape Caffeine's own check proves (the 2026-08-31 record), the Caffeine #348/#354 tails, fresh #259–#311 installs, **and** a Version 1.0.0 / #340 37-field heap with no recorded migration name (Stralt_V2 `ozvtz-4aaaa-aaaai-av4yq-cai` after the 20260826 name-only restore still trapped: genesis was `{}`). Fall back to (b) only if a readout shows `snapshots/unsupported/pr258-tail-20260831-gamekey.most` and the data is expendable; otherwise bridge through the commit named in `snapshots/README.md`.
 
 ### `dfx.json` vs `mops.toml`
 
@@ -351,7 +351,7 @@ It is a no-op stub (returns `0`; Candid kept). Official XP/Doka go through `appl
 
 ## Operational checklist (canister upgrade)
 
-1. Confirm `src/backend/main.mo` and `migrations/` match the intended `CharacterStats` (12 fields, `killCount` present, no `wp`/`wr`/`scp`) and admin `SpellConfig` summon fields. Chain: `20260801` genesis (`OldActor = {}`), `20260803_185500` name-only, `20260827` drop-transients, `20260831` summon + rollback (frozen, the 2026-08-31 deployed tail), `20260901` GameKey maps (frozen, `OldActor = {}`). New persistent fields need a **new later** file — do not edit a shipped `NewActor`.
+1. Confirm `src/backend/main.mo` and `migrations/` match the intended `CharacterStats` (12 fields, `killCount` present, no `wp`/`wr`/`scp`) and admin `SpellConfig` summon fields. Chain: `20260801` genesis (optional 37-field #340 adopt), `20260803_185500` name-only, `20260826` name-only, `20260827` drop-transients, `20260831` summon + rollback (frozen, the 2026-08-31 deployed tail), `20260901` GameKey maps (frozen, `OldActor = {}`). New persistent fields need a **new later** file — do not edit a shipped `NewActor`.
 2. Confirm `applyRewards` uses `100 * 2^(N-1)` (same as `utils/xpCurve.ts`).
 3. `caffeine check --fix` then `caffeine build` (or the project’s deploy pipeline). Do not `dfx deploy` — `dfx.json` points at missing `src/backend_extended/main.mo`.
 4. `pnpm bindgen` and commit generated client files.

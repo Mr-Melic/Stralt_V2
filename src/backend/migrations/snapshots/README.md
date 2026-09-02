@@ -29,8 +29,8 @@ Verified in the moc 1.11.2 source and on PocketIC (`scripts/eop-upgrade-matrix.m
 * **Runtime** (`src/lowering/desugar.ml`): the canister stores the names of the
   migrations it applied; the new program compares the *most recently applied*
   name with each chain file name. That file is the position; the stored state is
-  loaded as the chain type at that position and every later file runs. No match
-  → the whole chain runs from the genesis input `{}`.
+  loaded as the chain type at that position and every later file runs.   No match
+  → `ICStableRead` of genesis OldActor (`20260801`, optional 37-field #340 shape).
 * **Compile time** (`mo_types/type.ml` `pre`/`post`): the position is the last
   name in the previous `.most` chain block. Every actor field that no later
   chain file produces is a *required input* there, and every `OldActor` field of
@@ -66,7 +66,7 @@ deployed tail lacks must be produced by a **later** chain file.
 | `deployed/pr259-tail-20260901.most` | `20260901_000000` | main between PR #259 and #311 `1d5395a`, fresh install | yes (head of the chain, nothing runs) |
 | `empty-canister.most` | none | brand-new Caffeine project / first install | yes (whole chain runs) |
 | `unsupported/pr258-tail-20260831-gamekey.most` | `20260831_000000` (with GameKey) | PR #258 `58302bc` | **no** — same name as the deployed tail but five extra fields (M0169 / Memory-incompatible). No Caffeine deploy of #258 succeeded, so no known canister holds it; if one does, deploy `origin/main@d8b8f35` (#311 chain: GameKey on 20260831, `20260901` no-op) first, then this chain. |
-| `unsupported/caffeine-340-legacy-no-chain.most` | none, 37 legacy stables | Caffeine build #340 `cfe614b` | **no** — only a chain whose first input is the 37-field legacy actor could adopt it (that is what #347's `20260803_185500` did). |
+| `deployed/caffeine-340-legacy-no-chain.most` | none (Version 1.0.0, 37 stables) | Caffeine build #340 `cfe614b` — also Stralt_V2 `ozvtz…` if the fork never recorded EM names | yes (genesis `20260801` optional 37-field OldActor; each Ti <: ?Ti) |
 
 `mops check-stable <file> backend` is expected to pass for every `deployed/`
 file and `empty-canister.most`, and to fail (M0169 / M0263) for `unsupported/`.

@@ -56,8 +56,11 @@ Consequences:
   (`20260803_185500`, `20260826_000000`, `20260827_000000`, `20260831_000000`, `20260901_000000`).
   A `public func migration(_ : {}) : {} { {} }` no-op keeps the name.
 - Never change a frozen `NewActor` (through `20260901_000000`).
-- The genesis file must sort before every recorded name: `20260801_000000.mo`,
-  `OldActor = {}` (its own name never matters: it is never the head).
+- The genesis file must sort before every recorded name: `20260801_000000.mo`.
+  OldActor field names match NewActor but each field is `?T` so a Version 1.0.0
+  / Caffeine #340 37-field heap (no recorded name) is a subtype and an empty
+  install still defaults. A `{}` OldActor is type_0 and traps IC0503 on that
+  populated heap (Stralt_V2 `ozvtz-4aaaa-aaaai-av4yq-cai`).
 - Two canisters with the same latest name but different field sets cannot both
   be served by one chain. The PR #258 shape (GameKey on `20260831`) is
   documented as unsupported; bridge it through `origin/main@d8b8f35` first.

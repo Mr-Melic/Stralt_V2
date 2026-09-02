@@ -67,9 +67,9 @@
       "expect": "fail"
     },
     {
-      "name": "UNSUPPORTED: Caffeine #340 legacy actor, no chain",
+      "name": "Caffeine #340 legacy actor, no chain (Stralt_V2 ozvtz if the fork never recorded EM names)",
       "commits": ["cfe614b"],
-      "expect": "fail"
+      "expect": "ok"
     }
   ]
 }
