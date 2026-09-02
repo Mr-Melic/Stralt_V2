@@ -5,23 +5,22 @@ import AccessControl "mo:caffeineai-authorization/access-control";
 
 module {
 
-  // Empty-canister genesis. A fresh Caffeine install runs the whole chain from
-  // a canister whose previous stable signature has no fields. The rest of the
-  // chain (20260827 drop-transients, 20260831 summon + rollback, 20260901
-  // GameKey) describes upgrades from a real populated actor.
+  // Chain genesis (first in lex order). moc's k=0 `ICStableRead` uses this
+  // file's OldActor as type_0 whenever the canister has no recorded migration
+  // name (Version 1.0.0 / Caffeine #340 / a fork that never applied EM).
   //
-  // The runtime only runs chain files whose name sorts AFTER the latest
-  // migration already recorded on the canister. This file was named
-  // 20260826_000000 until 2026-09-02; the original Caffeine canister
-  // (cwofb-yqaaa-aaaap-qp45q-cai) recorded `20260803_185500` as its first
-  // migration, so a 20260826 genesis was *pending* there and its `{}` input
-  // collided with the 37 legacy fields already in memory (RTS error:
-  // Memory-incompatible program upgrade, reproduced on PocketIC). Sorting
-  // before 20260803_185500 keeps it skipped on every populated canister and
-  // still first on an empty one. Stralt_V2 (ozvtz-4aaaa-aaaai-av4yq-cai)
-  // recorded the old name on its first deploy — keep `20260826_000000.mo`
-  // as a name-only no-op so that canister still matches. Must stay first in
-  // lex order and must never become the OldActor of a populated upgrade.
+  // A `{}` OldActor traps `RTS error: Memory-incompatible program upgrade`
+  // (IC0503) on any populated heap — that is Stralt_V2 canister
+  // ozvtz-4aaaa-aaaai-av4yq-cai after restoring the 20260826 *name* still
+  // failed: no name matched, so genesis `{}` was the read type.
+  //
+  // OldActor fields are optional so BOTH shapes work:
+  //   * empty canister / fresh install: every field is `null` → defaults
+  //     (same zeros / empty maps as the previous `{}` genesis).
+  //   * Caffeine #340 37-field legacy actor: each required field promotes
+  //     to `?T` and is copied (admin roles, Doka, characters stay).
+  // NewActor stays the frozen 37-field pre-transient-drop shape so 20260827
+  // can still consume it. Do not add GameKey here.
 
   // ─── Inlined types (must match 20260827 OldActor; no project imports) ──
 
@@ -286,8 +285,49 @@ module {
     colorHex    : Text;
   };
 
-  // Fresh / Caffeine-empty previous version: zero stables.
-  type OldActor = {};
+  // Optional so an empty previous is still a subtype (fresh install) and a
+  // populated 37-field #340 actor is a subtype (each Ti <: ?Ti). Extra fields
+  // beyond this set still trap IC0503 — that is the PR #258 / stuffed-GameKey
+  // case, documented under snapshots/unsupported/.
+  type OldActor = {
+    accessControlState : ?AccessControl.AccessControlState;
+    userProfiles : ?Map.Map<Principal, UserProfile>;
+    characterSlots : ?Map.Map<Principal, CharacterSlots>;
+    enemyConfigs : ?Map.Map<Text, EnemyConfig>;
+    regionConfigs : ?Map.Map<Text, RegionConfig>;
+    playerSpriteConfigs : ?Map.Map<Text, PlayerSpriteConfig>;
+    levelUpConfig : ?LevelUpConfig;
+    spellConfigs : ?Map.Map<Text, SpellConfig>;
+    mapModifierConfigs : ?Map.Map<Text, MapModifierConfig>;
+    roleChangeTimestamps : ?Map.Map<Text, Int>;
+    shopPackages : ?Map.Map<Text, ShopPackage>;
+    achievementConfigs : ?Map.Map<Text, AchievementConfig>;
+    achievementProgress : ?Map.Map<Text, AchievementProgress>;
+    purchaseRecords : ?Map.Map<Text, PurchaseRecord>;
+    nextPurchaseId : ?Nat;
+    bannedPrincipals : ?Map.Map<Text, Bool>;
+    gameConfig : ?AdminGameConfig;
+    tierSpawnConfig : ?TierSpawnConfig;
+    colorPaletteStore : ?Text;
+    bossRushConfigStore : ?Text;
+    appVersion : ?Text;
+    changelogs : ?Map.Map<Text, Text>;
+    changelogShownVersions : ?Map.Map<Principal, Text>;
+    buffInventories : ?Map.Map<Text, BuffInventory>;
+    dungeonRecords : ?Map.Map<Principal, DungeonRecord>;
+    bossConfigs : ?Map.Map<Text, BossConfig>;
+    bossPortalAssignments : ?Map.Map<Text, Text>;
+    dokaBalances : ?Map.Map<Principal, Nat>;
+    bossRushStates : ?Map.Map<Text, BossRushState>;
+    enemyNames : ?List.List<Text>;
+    enemyNamesInitialised : ?Bool;
+    adBoxes : ?[(Text, Text, Bool)];
+    BUFF_CATALOG : ?[(Text, Text, Nat)];
+    DEFAULT_ENEMY_NAMES : ?[Text];
+    ROLE_CHANGE_MIN_NS : ?Int;
+    chatMessages : ?List.List<ChatMessage>;
+    nextChatId : ?Nat;
+  };
 
   // Must equal 20260827_000000.mo OldActor so the next step can drop transients
   // without rewriting a populated canister. Zero/empty values let main.mo
@@ -358,45 +398,52 @@ module {
     threeOrMorePercent = 0.0;
   };
 
-  public func migration(_old : OldActor) : NewActor {
+  func take<T>(opt : ?T, fallback : T) : T {
+    switch (opt) {
+      case (?value) { value };
+      case null { fallback };
+    };
+  };
+
+  public func migration(old : OldActor) : NewActor {
     {
-      accessControlState = AccessControl.initState();
-      userProfiles = Map.empty();
-      characterSlots = Map.empty();
-      enemyConfigs = Map.empty();
-      regionConfigs = Map.empty();
-      playerSpriteConfigs = Map.empty();
-      var levelUpConfig = emptyLevelUp;
-      spellConfigs = Map.empty();
-      mapModifierConfigs = Map.empty();
-      roleChangeTimestamps = Map.empty();
-      shopPackages = Map.empty();
-      achievementConfigs = Map.empty();
-      achievementProgress = Map.empty();
-      purchaseRecords = Map.empty();
-      var nextPurchaseId = 0;
-      bannedPrincipals = Map.empty();
-      var gameConfig = emptyGame;
-      var tierSpawnConfig = emptyTierSpawn;
-      var colorPaletteStore = "";
-      var bossRushConfigStore = "";
-      var appVersion = "";
-      changelogs = Map.empty();
-      changelogShownVersions = Map.empty();
-      buffInventories = Map.empty();
-      dungeonRecords = Map.empty();
-      bossConfigs = Map.empty();
-      bossPortalAssignments = Map.empty();
-      dokaBalances = Map.empty();
-      bossRushStates = Map.empty();
-      var enemyNames = List.empty();
-      var enemyNamesInitialised = false;
-      var adBoxes = [];
-      BUFF_CATALOG = [];
-      DEFAULT_ENEMY_NAMES = [];
-      ROLE_CHANGE_MIN_NS = 0;
-      var chatMessages = List.empty();
-      var nextChatId = 0;
+      accessControlState = take(old.accessControlState, AccessControl.initState());
+      userProfiles = take(old.userProfiles, Map.empty());
+      characterSlots = take(old.characterSlots, Map.empty());
+      enemyConfigs = take(old.enemyConfigs, Map.empty());
+      regionConfigs = take(old.regionConfigs, Map.empty());
+      playerSpriteConfigs = take(old.playerSpriteConfigs, Map.empty());
+      var levelUpConfig = take(old.levelUpConfig, emptyLevelUp);
+      spellConfigs = take(old.spellConfigs, Map.empty());
+      mapModifierConfigs = take(old.mapModifierConfigs, Map.empty());
+      roleChangeTimestamps = take(old.roleChangeTimestamps, Map.empty());
+      shopPackages = take(old.shopPackages, Map.empty());
+      achievementConfigs = take(old.achievementConfigs, Map.empty());
+      achievementProgress = take(old.achievementProgress, Map.empty());
+      purchaseRecords = take(old.purchaseRecords, Map.empty());
+      var nextPurchaseId = take(old.nextPurchaseId, 0);
+      bannedPrincipals = take(old.bannedPrincipals, Map.empty());
+      var gameConfig = take(old.gameConfig, emptyGame);
+      var tierSpawnConfig = take(old.tierSpawnConfig, emptyTierSpawn);
+      var colorPaletteStore = take(old.colorPaletteStore, "");
+      var bossRushConfigStore = take(old.bossRushConfigStore, "");
+      var appVersion = take(old.appVersion, "");
+      changelogs = take(old.changelogs, Map.empty());
+      changelogShownVersions = take(old.changelogShownVersions, Map.empty());
+      buffInventories = take(old.buffInventories, Map.empty());
+      dungeonRecords = take(old.dungeonRecords, Map.empty());
+      bossConfigs = take(old.bossConfigs, Map.empty());
+      bossPortalAssignments = take(old.bossPortalAssignments, Map.empty());
+      dokaBalances = take(old.dokaBalances, Map.empty());
+      bossRushStates = take(old.bossRushStates, Map.empty());
+      var enemyNames = take(old.enemyNames, List.empty());
+      var enemyNamesInitialised = take(old.enemyNamesInitialised, false);
+      var adBoxes = take(old.adBoxes, [] : [(Text, Text, Bool)]);
+      BUFF_CATALOG = take(old.BUFF_CATALOG, [] : [(Text, Text, Nat)]);
+      DEFAULT_ENEMY_NAMES = take(old.DEFAULT_ENEMY_NAMES, [] : [Text]);
+      ROLE_CHANGE_MIN_NS = take(old.ROLE_CHANGE_MIN_NS, 0);
+      var chatMessages = take(old.chatMessages, List.empty());
+      var nextChatId = take(old.nextChatId, 0);
     };
   };
 };

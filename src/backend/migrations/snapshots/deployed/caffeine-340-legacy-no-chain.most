@@ -1,6 +1,8 @@
 // Version: 1.0.0
-// Snapshot: Caffeine build #340 legacy EOP actor (no migration chain, 37 stables). NOT upgradable by a chain whose genesis input is {}; only #347 (20260803_185500 with the legacy OldActor) could adopt it.
-// Built from git cfe614b with moc 1.11.2.
+// Snapshot: Caffeine build #340 legacy EOP actor (no migration chain, 37 stables).
+// Adopted by 20260801_000000 OldActor (optional 37-field set; each Ti <: ?Ti).
+// Built from git cfe614b with moc 1.11.2. Same shape as a Caffeine fork
+// canister that never recorded an enhanced-migration name (Stralt_V2 ozvtz…).
 type AchievementConfig__943077584 =
   {
     active : Bool;

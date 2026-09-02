@@ -28,9 +28,9 @@ path = ".old/src/backend/dist/backend.most"
 
 [canisters.backend.migrations]
 chain = "src/backend/migrations"
-# Must be >= number of chain files so `mops check` keeps the empty-canister
-# genesis (20260801, OldActor = {}) and a fresh install still compiles (M0263).
-# 6 = 20260801 genesis, 20260803 no-op, 20260826 V2-recorded genesis name,
+# Must be >= number of chain files so `mops check` keeps genesis
+# (20260801 optional 37-field #340 adopt) plus later steps.
+# 6 = 20260801, 20260803 no-op, 20260826 V2-recorded name,
 # 20260827, 20260831, 20260901 GameKey.
 check-limit = 6
 

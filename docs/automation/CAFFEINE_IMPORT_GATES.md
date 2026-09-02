@@ -44,7 +44,7 @@ Import failed after merge bursts on:
 | Format nits | `pnpm check` (formatter enabled) |
 | Mock TS2740 | `pnpm typecheck` |
 | Motoko M0215 / M0001 / M0155 | `mops check` / `caffeine check` |
-| Empty-canister M0263 | `mops check --no-check-limit` + `mops check-stable snapshots/empty-canister.most` + genesis migration `20260801_000000` (`OldActor = {}`) |
+| Empty-canister M0263 | `mops check --no-check-limit` + `mops check-stable snapshots/empty-canister.most` + genesis `20260801_000000` (optional 37-field OldActor; missing → defaults) |
 | Duplicate `export function` (esbuild “already been declared”) | `python3 scripts/check-duplicate-exports.py` + `pnpm typecheck` (TS2393) + Biome `noRedeclare` + `pnpm --dir src/frontend build` |
 | Populated EOP `Memory-incompatible program upgrade` / IC0503 (3× on `cwofb…` / `zh6cg…`) | `python3 scripts/check-eop-stables.py` (frozen `NewActor`s, recorded chain names must stay files, `.old` must be a real signature, runtime-rule verdict for every snapshot) + `mops check-stable` vs `.old` **and** every `snapshots/deployed/*.most` + a **new later** migration (never edit a shipped `NewActor`) + `node scripts/eop-upgrade-matrix.mjs` when PocketIC is present |
 | Caffeine `M0263 the previous version does not contain the stable variable X` (PR #311 import) | `mops check` against the byte-identical `.old` of Caffeine's last deployed build reproduces it locally; fix = introduce `X` in a chain file that sorts **after** the deployed tail (`20260901_000000` for GameKey), never on the deployed step |
