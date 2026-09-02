@@ -1,5 +1,6 @@
 import type React from "react";
 import { useCallback, useEffect, useRef } from "react";
+import { shouldRunDecorativeCanvasLoop } from "../engine/canvasLoopActivity";
 
 interface BloodParticle {
   x: number;
@@ -92,27 +93,46 @@ const BloodParticles: React.FC<BloodParticlesProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    let ctx = canvas.getContext("2d");
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
       const { width, height } = entry.contentRect;
       canvas.width = width;
       canvas.height = height;
+      ctx = canvas.getContext("2d");
     });
     ro.observe(canvas.parentElement || canvas);
     const parent = canvas.parentElement || canvas;
     canvas.width = parent.clientWidth || 100;
     canvas.height = parent.clientHeight || 100;
+    ctx = canvas.getContext("2d");
+
+    const myGen = ++bpGenRef.current;
+
+    const stopLoop = () => {
+      if (animFrameRef.current !== undefined) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = undefined;
+      }
+    };
 
     const animate = () => {
-      // LEAK-18: Self-terminate if our generation is stale
-      const myGen = bpGenRef.current;
-      animFrameRef.current = requestAnimationFrame(() => {
-        if (bpGenRef.current !== myGen) return;
-        animate();
-      });
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+      if (bpGenRef.current !== myGen) return;
+      // PERF-2026-09-02-059: actually stop the RAF chain while hidden
+      // (053 only skipped draw). CharacterSelection can mount one instance
+      // per filled slot under the root Starfield.
+      if (
+        typeof document !== "undefined" &&
+        !shouldRunDecorativeCanvasLoop(document.hidden)
+      ) {
+        animFrameRef.current = undefined;
+        return;
+      }
+      if (!ctx) {
+        animFrameRef.current = requestAnimationFrame(animate);
+        return;
+      }
       const w = canvas.width;
       const h = canvas.height;
 
@@ -128,14 +148,17 @@ const BloodParticles: React.FC<BloodParticlesProps> = ({
         : Math.floor(Math.random() * 2) + 1;
 
       // Add new particles
+      const particles = particlesRef.current;
       for (let i = 0; i < spawnCount; i++) {
-        if (particlesRef.current.length < maxParticles) {
-          particlesRef.current.push(spawnParticle(w, h));
+        if (particles.length < maxParticles) {
+          particles.push(spawnParticle(w, h));
         }
       }
 
-      // Update and draw
-      particlesRef.current = particlesRef.current.filter((p) => {
+      // Update and draw in place — no per-frame filter() allocation.
+      let write = 0;
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
         p.age++;
         p.x += p.vx;
         p.y += p.vy;
@@ -146,9 +169,8 @@ const BloodParticles: React.FC<BloodParticlesProps> = ({
         const lifeRatio = p.age / p.lifetime;
         p.alpha = 0.8 * (1 - lifeRatio);
 
-        if (p.alpha <= 0 || p.y > h + 10) return false;
+        if (p.alpha <= 0 || p.y > h + 10) continue;
 
-        ctx.save();
         ctx.globalAlpha = p.alpha;
         ctx.fillStyle = p.color;
         ctx.beginPath();
@@ -163,17 +185,45 @@ const BloodParticles: React.FC<BloodParticlesProps> = ({
           Math.PI * 2,
         );
         ctx.fill();
-        ctx.restore();
 
-        return true;
-      });
+        particles[write++] = p;
+      }
+      particles.length = write;
+      ctx.globalAlpha = 1;
+
+      animFrameRef.current = requestAnimationFrame(animate);
     };
 
-    animFrameRef.current = requestAnimationFrame(animate);
+    const startLoop = () => {
+      if (bpGenRef.current !== myGen) return;
+      if (
+        typeof document !== "undefined" &&
+        !shouldRunDecorativeCanvasLoop(document.hidden)
+      ) {
+        return;
+      }
+      if (animFrameRef.current !== undefined) return;
+      animFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    const syncLoop = () => {
+      if (
+        typeof document !== "undefined" &&
+        !shouldRunDecorativeCanvasLoop(document.hidden)
+      ) {
+        stopLoop();
+        return;
+      }
+      startLoop();
+    };
+
+    document.addEventListener("visibilitychange", syncLoop);
+    startLoop();
     return () => {
+      document.removeEventListener("visibilitychange", syncLoop);
       // LEAK-18: Increment generation so any in-flight RAF frame self-terminates
       bpGenRef.current += 1;
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      stopLoop();
       ro.disconnect();
     };
   }, [spawnParticle]);

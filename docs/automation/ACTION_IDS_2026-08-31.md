@@ -1,4 +1,10 @@
-# ACTION_IDs — 2026-08-31 Spell, Discovery & Achievement Admin Designer
+# ACTION_IDs — 2026-08-31 (dump yard — do not append)
+
+**2026-09-01 director:** This file is a specialist append log, not the living index. New producer records go in `ACTION_IDS_<PREFIX>_YYYY-MM-DD.md`. Current director roadmap and reused IDs: [`MASTER_ROADMAP.md`](./MASTER_ROADMAP.md) + [`ACTION_IDS_2026-09-01.md`](./ACTION_IDS_2026-09-01.md). Do not add more catalogs below.
+
+---
+
+# Original header — 2026-08-31 Spell, Discovery & Achievement Admin Designer
 
 Durable ledger for implementers and the Report Action Orchestrator.  
 Source of every record: Spell, Discovery & Achievement Admin Designer.  

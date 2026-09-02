@@ -785,7 +785,3 @@ export const DEFAULT_BOSS_CONFIGS: BossConfig[] = [
     },
   },
 ];
-
-export function getDefaultBossConfig(id: string): BossConfig | undefined {
-  return DEFAULT_BOSS_CONFIGS.find((b) => b.id === id);
-}

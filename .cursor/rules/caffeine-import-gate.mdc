@@ -1,0 +1,18 @@
+---
+description: Mandatory Caffeine import gates before finishing any code change
+alwaysApply: true
+---
+
+# Caffeine import gates (do not skip)
+
+Caffeine GitHub → import failed on unused-vars, hook-deps, mock TS2740, Motoko M0215/M0001/M0155, and empty-canister M0263 when agents treated those as “pre-existing, skip.”
+
+Before you finish, open a PR, or merge code:
+
+1. Run `pnpm typecheck` and `pnpm check` (or `pnpm fix` then `pnpm check`). Unused locals and `useExhaustiveDependencies` are **errors**.
+2. If Motoko, migrations, `.old`, `mops.toml`, or frontend mocks changed: run `mops check` or `caffeine check`. Missing toolchain is a **failure**, not a skip. Do not require `caffeine build` / PocketIC unless deploying. New persistent `let`/`var` on `main.mo` need a **new later** migration file after `20260901` (never amend a shipped `NewActor`, never rename/delete a chain file). Also `python3 scripts/check-eop-stables.py` and `bash scripts/caffeine-import-gate.sh backend` (check-stable vs `.old` = deployed signature, `snapshots/deployed/*.most`, `empty-canister.most`). Never blank `.old`. `Memory-incompatible program upgrade` means this class of bug (see `.cursor/rules/eop-stable-migrations.mdc`). Duplicate `export function` copies in one TS file fail `vite build` (esbuild) — keep one implementation; restack union is not concatenate.
+3. Never finish with known unused-vars, hook-deps, mock shape mismatches, Motoko compile errors, or check-stable vs empty previous.
+
+Repo script (same commands): `bash scripts/caffeine-import-gate.sh all`
+
+Cursor Cloud Automations have **no write/update API** from this agent. These rules plus `AGENTS.md` and `.github/workflows/caffeine-import-gate.yml` are the enforceable gate. Paste the addendum in `docs/automation/CAFFEINE_IMPORT_GATES.md` into each automation prompt in the Cursor dashboard.

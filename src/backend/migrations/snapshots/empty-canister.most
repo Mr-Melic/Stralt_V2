@@ -1,0 +1,3 @@
+// Version: 1.0.0
+// Snapshot: empty canister (fresh Caffeine project / first install). The whole chain runs from 20260801_000000.
+actor { };

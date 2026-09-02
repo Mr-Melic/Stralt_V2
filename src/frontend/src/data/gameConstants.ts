@@ -208,13 +208,13 @@ export const ENEMY_AI_TIER_GATES = {
   defensiveRetreat: 3,
 } as const;
 
-// ── AI SOPHISTICATION THRESHOLDS (Section 3 — enemyAI.ts / summonAI.ts) ────────
+// ── AI SOPHISTICATION THRESHOLDS (Section 3 — enemyAI.ts) ────────
 // Master toggles and tuning knobs for the higher-order AI behaviors layered on
 // top of the baseline ENEMY_* thresholds. Each toggle gates a discrete
 // capability so it can be flipped off for tuning or debugging without touching
-// the AI module. Consumed by decideEnemyAction (engine/enemyAI.ts) and
-// runSummonAI (engine/summonAI.ts). No magic numbers in those modules — every
-// threshold below is the single source of truth.
+// the AI module. Consumed by decideEnemyAction (engine/enemyAI.ts).
+// `runSummonAI` in engine/summonAI.ts is unused. No magic numbers in the
+// live AI module — every threshold below is the single source of truth.
 
 /**
  * Master toggle for one-turn lethal lookahead. When enabled, the AI evaluates

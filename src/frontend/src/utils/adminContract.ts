@@ -140,6 +140,31 @@ export function readPurchasesResult(result: unknown): AdminPurchaseRecord[] {
   return ok.map(mapPurchaseRecordFromBackend);
 }
 
+/** Unwrap getBannedPrincipals #ok so Shop can list who to unban. */
+export function readPrincipalListResult(
+  result: unknown,
+  method: string,
+): string[] {
+  if (Array.isArray(result)) {
+    return result.map((p) => textOf(p)).filter((t) => t.length > 0);
+  }
+  if (result == null || typeof result !== "object") {
+    throw new Error(`${method} returned an empty result`);
+  }
+  const r = result as Record<string, unknown>;
+  if (
+    r.__kind__ === "err" ||
+    (r.err != null && r.ok == null && r._ok == null)
+  ) {
+    throw new Error(String(r.err ?? r._err ?? `${method} failed`));
+  }
+  const ok = r.ok ?? r._ok;
+  if (!Array.isArray(ok)) {
+    throw new Error(`${method} missing ok payload`);
+  }
+  return ok.map((p) => textOf(p)).filter((t) => t.length > 0);
+}
+
 export function optUrlToOptional(
   value: [] | [string] | string | undefined | null,
 ): string | undefined {
@@ -226,35 +251,165 @@ export function fromBackendPlayerSpriteConfig<T extends SpriteWalkFields>(
   };
 }
 
+type SummonUnitBridge = {
+  pieceType?: string;
+  level?: number | bigint;
+  hpScale?: number;
+  damageScale?: number;
+};
+
+export type BackendSummonUnitDef = {
+  pieceType: string;
+  level: bigint;
+  hpScale: number;
+  damageScale: number;
+};
+
 type SpellBridgeFields = {
   hitsMultiple?: boolean;
   multiTarget?: boolean;
   cooldown?: number | bigint;
+  isSummon?: boolean;
+  summonAI?: string;
+  summonLifespan?: number | bigint;
+  summonUnitDef?: SummonUnitBridge | null;
 };
+
+function natOf(value: number | bigint | undefined | null): bigint {
+  if (typeof value === "bigint") return value < 0n ? 0n : value;
+  return BigInt(Math.max(0, Math.round(Number(value) || 0)));
+}
+
+/** Empty summon metadata matching Motoko admin defaults / 20260831 migration. */
+export function emptyBackendSummonUnitDef(): BackendSummonUnitDef {
+  return {
+    pieceType: "",
+    level: 0n,
+    hpScale: 0,
+    damageScale: 0,
+  };
+}
+
+export function toBackendSummonUnitDef(
+  def?: SummonUnitBridge | null,
+): BackendSummonUnitDef {
+  if (def == null) return emptyBackendSummonUnitDef();
+  return {
+    pieceType: typeof def.pieceType === "string" ? def.pieceType : "",
+    level: natOf(def.level),
+    hpScale: Number(def.hpScale) || 0,
+    damageScale: Number(def.damageScale) || 0,
+  };
+}
 
 export function toBackendSpellConfig<T extends SpellBridgeFields>(
   config: T,
-): T & { multiTarget: boolean; cooldown: bigint } {
+): T & {
+  multiTarget: boolean;
+  cooldown: bigint;
+  isSummon: boolean;
+  summonAI: string;
+  summonLifespan: bigint;
+  summonUnitDef: BackendSummonUnitDef;
+} {
   const cooldownRaw = config.cooldown ?? 0;
   const cooldown =
     typeof cooldownRaw === "bigint"
-      ? cooldownRaw
+      ? cooldownRaw < 0n
+        ? 0n
+        : cooldownRaw
       : BigInt(Math.max(0, Math.round(Number(cooldownRaw) || 0)));
   return {
     ...config,
     multiTarget: config.multiTarget ?? config.hitsMultiple ?? false,
     cooldown,
+    isSummon: config.isSummon === true,
+    summonAI: typeof config.summonAI === "string" ? config.summonAI : "",
+    summonLifespan: natOf(config.summonLifespan),
+    summonUnitDef: toBackendSummonUnitDef(config.summonUnitDef),
+  };
+}
+
+/** Motoko / bindgen LevelUpConfig. Frontend drafts also use apMpGrowthEveryNLevels. */
+export type LevelUpConfigWrite = {
+  statGrowthPercent?: number | bigint;
+  apMpLevelThreshold?: number | bigint;
+  apMpGrowthEveryNLevels?: number | bigint;
+  spellLevelingBaseCost?: number | bigint;
+  spellLevelingCostMultiplier?: number;
+  spellDmgGrowthPercent?: number | bigint;
+  maxSpellRange?: number | bigint;
+  spellRangeGrowthLevels?: number | bigint;
+  spellFailBaseChance?: number;
+  spellFailReductionPerLevel?: number;
+};
+
+function natField(
+  value: number | bigint | undefined,
+  fallback: number,
+): bigint {
+  const n = value == null ? fallback : Number(value);
+  return BigInt(Math.max(0, Math.round(Number.isFinite(n) ? n : fallback)));
+}
+
+/** Full 9-field Candid payload. Never omit growth/cost fields (Candid rejects partials). */
+export function toBackendLevelUpConfig(cfg: LevelUpConfigWrite): {
+  statGrowthPercent: bigint;
+  apMpLevelThreshold: bigint;
+  spellLevelingBaseCost: bigint;
+  spellLevelingCostMultiplier: number;
+  spellDmgGrowthPercent: bigint;
+  maxSpellRange: bigint;
+  spellRangeGrowthLevels: bigint;
+  spellFailBaseChance: number;
+  spellFailReductionPerLevel: number;
+} {
+  const apMp = cfg.apMpLevelThreshold ?? cfg.apMpGrowthEveryNLevels;
+  return {
+    statGrowthPercent: natField(cfg.statGrowthPercent, 5),
+    apMpLevelThreshold: natField(apMp, 25),
+    spellLevelingBaseCost: natField(cfg.spellLevelingBaseCost, 10),
+    spellLevelingCostMultiplier: Number(cfg.spellLevelingCostMultiplier ?? 2),
+    spellDmgGrowthPercent: natField(cfg.spellDmgGrowthPercent, 3),
+    maxSpellRange: natField(cfg.maxSpellRange, 5),
+    spellRangeGrowthLevels: natField(cfg.spellRangeGrowthLevels, 10),
+    spellFailBaseChance: Number(cfg.spellFailBaseChance ?? 20),
+    spellFailReductionPerLevel: Number(cfg.spellFailReductionPerLevel ?? 0.1),
   };
 }
 
 export function fromBackendSpellConfig<T extends SpellBridgeFields>(
   raw: T,
-): T & { hitsMultiple: boolean; cooldown: number } {
+): T & {
+  hitsMultiple: boolean;
+  cooldown: number;
+  isSummon: boolean;
+  summonAI: string;
+  summonLifespan: number;
+} {
   const cooldownRaw = raw.cooldown ?? 0;
+  const lifespanRaw = raw.summonLifespan ?? 0;
+  const unit = raw.summonUnitDef;
   return {
     ...raw,
     hitsMultiple: raw.hitsMultiple ?? raw.multiTarget ?? false,
     cooldown: Number(cooldownRaw) || 0,
+    isSummon: raw.isSummon === true,
+    summonAI: typeof raw.summonAI === "string" ? raw.summonAI : "",
+    summonLifespan: Number(lifespanRaw) || 0,
+    summonUnitDef: unit
+      ? {
+          pieceType: typeof unit.pieceType === "string" ? unit.pieceType : "",
+          level: Number(unit.level) || 0,
+          hpScale: Number(unit.hpScale) || 0,
+          damageScale: Number(unit.damageScale) || 0,
+        }
+      : {
+          pieceType: "",
+          level: 0,
+          hpScale: 0,
+          damageScale: 0,
+        },
   };
 }
 

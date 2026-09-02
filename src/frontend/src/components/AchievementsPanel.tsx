@@ -219,7 +219,7 @@ const AchievementsPanel: React.FC<AchievementsPanelProps> = ({
         className="stone-frame"
         style={{
           width: "min(520px, 94vw)",
-          maxHeight: "80vh",
+          maxHeight: "min(80vh, 80dvh)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -238,7 +238,7 @@ const AchievementsPanel: React.FC<AchievementsPanelProps> = ({
             data-ocid="achievements.close_button"
             onClick={onClose}
             aria-label="Close achievements"
-            className="stone-btn-slate"
+            className="stone-btn-slate stone-modal-close"
             style={{
               width: 30,
               height: 30,

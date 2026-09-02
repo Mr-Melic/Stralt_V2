@@ -14,10 +14,10 @@ import { collectPreservedLocalStorage } from "./utils/versionGate";
 const APP_VERSION = "v163";
 
 const CHANGELOG_ITEMS = [
-  "🏆 Achievements system — 15 milestones with Doka rewards",
-  "✨ Unique spell range patterns + 3 ultimate spells (Obliterate, Plague Wave, Void Collapse)",
-  "🤖 Enemy AI fully rebuilt — group tactics, leader death animation, cooldown strategy",
-  "💰 Doka ground loot visual trails — pick up coins scattered across maps",
+  "💰 Buy Doka is real-money credit: pay on Mollie, then redeem a GameKey while logged in",
+  "⚗️ Items (potions) spends Doka — it is not the same door as Buy Doka",
+  "💀 Death costs 20% leftover XP and 40% Doka, then the Death Realm — walk to a portal",
+  "✨ The XP bar is leftover experience in the current level, not a lifetime total",
 ];
 
 const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
@@ -42,6 +42,11 @@ function persistSmallScreenContinue(): void {
 
 /** Warns on small screens; Continue lets the player enter anyway. */
 function SmallScreenGuard({ onContinue }: { onContinue: () => void }) {
+  const continueRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    continueRef.current?.focus();
+  }, []);
+
   return (
     <dialog
       open
@@ -105,6 +110,7 @@ function SmallScreenGuard({ onContinue }: { onContinue: () => void }) {
           experience, use a device with a larger screen (768px or wider).
         </p>
         <button
+          ref={continueRef}
           type="button"
           data-ocid="small_screen.continue_button"
           onClick={onContinue}
@@ -135,12 +141,30 @@ function SmallScreenGuard({ onContinue }: { onContinue: () => void }) {
 
 /** Changelog popup — shown once after each update when the player re-logs in */
 function ChangelogPopup({ onDismiss }: { onDismiss: () => void }) {
+  const dismissRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    dismissRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onDismiss();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onDismiss]);
+
   return (
-    <div
+    <dialog
+      open
       data-ocid="changelog.overlay"
+      aria-labelledby="changelog-title"
       style={{
         position: "fixed",
         inset: 0,
+        width: "100%",
+        height: "100%",
+        maxWidth: "none",
+        maxHeight: "none",
+        margin: 0,
+        border: "none",
         zIndex: 99000,
         display: "flex",
         alignItems: "center",
@@ -148,6 +172,8 @@ function ChangelogPopup({ onDismiss }: { onDismiss: () => void }) {
         background: "rgba(0,0,0,0.65)",
         backdropFilter: "blur(2px)",
         pointerEvents: "all",
+        padding:
+          "max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px))",
       }}
     >
       <div
@@ -158,6 +184,9 @@ function ChangelogPopup({ onDismiss }: { onDismiss: () => void }) {
           padding: "28px 28px 22px",
           maxWidth: 400,
           width: "calc(100% - 40px)",
+          maxHeight: "min(90vh, 90dvh)",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
           boxShadow: "0 0 60px rgba(139,26,26,0.5), 0 0 20px rgba(0,0,0,0.8)",
           fontFamily: "'Space Grotesk', system-ui, sans-serif",
         }}
@@ -172,6 +201,7 @@ function ChangelogPopup({ onDismiss }: { onDismiss: () => void }) {
         >
           <span style={{ fontSize: 26 }}>🧛</span>
           <h2
+            id="changelog-title"
             style={{
               color: "#e74c3c",
               fontWeight: 800,
@@ -222,6 +252,7 @@ function ChangelogPopup({ onDismiss }: { onDismiss: () => void }) {
           ))}
         </ul>
         <button
+          ref={dismissRef}
           type="button"
           data-ocid="changelog.dismiss_button"
           onClick={onDismiss}
@@ -244,7 +275,7 @@ function ChangelogPopup({ onDismiss }: { onDismiss: () => void }) {
           Got it — let me play!
         </button>
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -329,7 +360,6 @@ function App() {
   // Boost toggle lives here so the GameFlow top-bar pill can flip it.
   // WorldExploration still owns its own boostMode for reward math.
   const [boostMode, setBoostMode] = useState<"xp" | "rewards">("xp");
-  const [_showShop, _setShowShop] = useState(false);
 
   // Root-level battle summary popup state — survives battle→exploration transition
   const [battleSummary, setBattleSummary] = useState<BattleRecapData | null>(
@@ -496,7 +526,6 @@ function App() {
                   <PostBattleRecap
                     data={battleSummary}
                     onClose={() => {
-                      console.log("BattleSummary DISMISSED");
                       setBattleSummary(null);
                     }}
                   />

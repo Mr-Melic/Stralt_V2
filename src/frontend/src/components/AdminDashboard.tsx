@@ -1,7 +1,8 @@
 import { Principal } from "@dfinity/principal";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { backendInterface } from "../backend";
+import { listAdminModifierTypeOptions } from "../engine/mapModifiers";
 import { useActor } from "../hooks/useActor";
 import {
   useAdminAddEnemyName,
@@ -28,7 +29,6 @@ import {
   useGetGameConfig,
   useGetMapModifiers,
   useGetPlayerSpriteConfigs,
-  useGetPurchaseRecords,
   useGetRegionConfigs,
   useGetSpellConfigs,
   useInitDefaultNames,
@@ -51,17 +51,34 @@ import type {
   TierSpawnConfig,
 } from "../types/gameTypes";
 import {
+  assertAdminCmdOk,
+  readPrincipalListResult,
+  toBackendLevelUpConfig,
+} from "../utils/adminContract";
+import {
+  KNOWN_ACHIEVEMENT_CONDITIONS,
   MAX_DOKA_GRANT,
   unsafeUrl,
+  validateAchievementConfig,
   validateAdBox,
   validateDokaGrant,
   validateGameConfig,
   validateLevelUpConfig,
   validateOptionalUrl,
+  validateSpellConfig,
   validateTierSpawnConfig,
   validateWalkFrameUrls,
 } from "../utils/adminSafety";
+import {
+  ENEMY_SPRITE_URL_FIELD_LABEL,
+  ENEMY_SPRITE_URL_HELP,
+  ENEMY_SPRITE_URL_PLACEHOLDER,
+  PLAYER_SPRITE_URL_HONESTY,
+  enemyVisualStatusCopy,
+  spriteUrlIsStored,
+} from "../utils/adminVisualStatus";
 import { logDebugWarn } from "../utils/debugLogger";
+import AdminGameKeyPurchases from "./AdminGameKeyPurchases";
 
 // ── defaults ─────────────────────────────────────────────────────────────────
 
@@ -111,7 +128,14 @@ const newSpell = (): SpellConfig => ({
   isBarrier: false,
   isTrap: false,
   isMark: false,
+  isSummon: false,
+  summonAI: "",
+  summonLifespan: 0,
+  summonUnitDef: { pieceType: "", level: 0, hpScale: 0, damageScale: 0 },
 });
+
+/** Eligibility band only — not a player career cap. */
+const DEFAULT_ELIGIBILITY_LEVEL_MAX = BigInt(9999);
 
 const newEnemy = (): EnemyConfig => ({
   id: `enemy_${Date.now()}`,
@@ -121,7 +145,7 @@ const newEnemy = (): EnemyConfig => ({
   mp: BigInt(3),
   initStat: BigInt(8),
   levelMin: BigInt(1),
-  levelMax: BigInt(5),
+  levelMax: DEFAULT_ELIGIBILITY_LEVEL_MAX,
   regions: [],
   spriteUrl: [],
 });
@@ -130,7 +154,7 @@ const newRegion = (): RegionConfig => ({
   id: `region_${Date.now()}`,
   name: "",
   levelMin: BigInt(1),
-  levelMax: BigInt(5),
+  levelMax: DEFAULT_ELIGIBILITY_LEVEL_MAX,
   battleEffects: [],
   backgroundColor: "#0d0f1a",
 });
@@ -175,6 +199,12 @@ const C = {
   dimmer: "#5a5060",
 } as const;
 
+function matchesQuery(q: string, ...parts: Array<string | undefined>): boolean {
+  const n = q.trim().toLowerCase();
+  if (!n) return true;
+  return parts.some((p) => (p ?? "").toLowerCase().includes(n));
+}
+
 // ── shared primitives ─────────────────────────────────────────────────────────
 
 const inputStyle = (err?: boolean): React.CSSProperties => ({
@@ -214,6 +244,52 @@ const sectionHeadStyle: React.CSSProperties = {
   borderBottom: "1px solid rgba(216,70,63,0.25)",
   fontFamily: "'Saira', system-ui, sans-serif",
 };
+
+const ELIGIBILITY_BAND_HINT =
+  "Level Min/Max is an eligibility band, not a player career cap. New drafts default max to 9999 so high-level play still matches.";
+
+function CatalogNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p
+      data-ocid="admin.catalog_note"
+      style={{
+        color: C.dim,
+        fontSize: 11,
+        lineHeight: 1.5,
+        margin: "0 0 14px",
+        padding: "8px 10px",
+        border: `1px solid ${C.goldDim}`,
+        borderRadius: 6,
+        background: "linear-gradient(180deg,#13141c,#0e0f16)",
+      }}
+    >
+      {children}
+    </p>
+  );
+}
+
+function ListSearch({
+  value,
+  onChange,
+  placeholder,
+  ocid,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  ocid: string;
+}) {
+  return (
+    <input
+      type="search"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      data-ocid={ocid}
+      style={{ ...inputStyle(), maxWidth: 260, margin: 0 }}
+    />
+  );
+}
 
 function Btn({
   variant,
@@ -647,11 +723,17 @@ const EnemyEditor: React.FC<{
   const [cfg, setCfg] = useState<EnemyConfig>(initial);
   const set = <K extends keyof EnemyConfig>(k: K, v: EnemyConfig[K]) =>
     setCfg((p) => ({ ...p, [k]: v }));
+  const visualCopy = enemyVisualStatusCopy(spriteUrlIsStored(cfg.spriteUrl));
 
   return (
     <div data-ocid="admin.enemy_editor" style={{ padding: 20 }}>
       <EnemyPresets currentConfig={cfg} onLoad={(loaded) => setCfg(loaded)} />
-      <p style={sectionHeadStyle}>Enemy Configuration</p>
+      <p style={sectionHeadStyle}>Spawn template</p>
+      <p style={{ color: "#6a6070", fontSize: 10, margin: "0 0 10px" }}>
+        Catalog spawn fields only (hp/ap/mp/init/level/regions). Combat identity
+        (damage, res, sp, sr, chc) is not on this form and is not persisted
+        here.
+      </p>
 
       <div
         style={{
@@ -727,15 +809,16 @@ const EnemyEditor: React.FC<{
           ocid="admin.enemy.levelmax_input"
         />
       </div>
+      <p style={{ color: "#6a6070", fontSize: 10, margin: "0 0 10px" }}>
+        {ELIGIBILITY_BAND_HINT}
+      </p>
 
       <div style={{ marginBottom: 10 }}>
         <label htmlFor="admin.enemy.sprite_input" style={labelStyle}>
-          Custom Visual Override
+          {ENEMY_SPRITE_URL_FIELD_LABEL}
         </label>
         <p style={{ color: "#6a6070", fontSize: 10, margin: "0 0 6px" }}>
-          Default Pixel Visual — Active fallback when this field is empty. Leave
-          blank to keep the chess-piece sprite. PNG or WebP, square, pixel art
-          recommended (no upload yet — paste a hosted URL).
+          {ENEMY_SPRITE_URL_HELP}
         </p>
         <input
           id="admin.enemy.sprite_input"
@@ -744,22 +827,20 @@ const EnemyEditor: React.FC<{
           onChange={(e) =>
             set("spriteUrl", e.target.value ? [e.target.value] : [])
           }
-          placeholder="https://… (optional custom override)"
+          placeholder={ENEMY_SPRITE_URL_PLACEHOLDER}
           data-ocid="admin.enemy.sprite_input"
           style={inputStyle()}
         />
         <p
           data-ocid="admin.enemy.visual_status"
           style={{
-            color: cfg.spriteUrl[0] ? C.gold : C.green,
+            color: visualCopy.storedNotRendered ? C.dim : C.green,
             fontSize: 10,
             margin: "4px 0 0",
             fontWeight: 700,
           }}
         >
-          {cfg.spriteUrl[0]
-            ? "Custom Visual — 1 override URL"
-            : "Default Pixel Visual — Active fallback"}
+          {visualCopy.status}
         </p>
       </div>
 
@@ -829,6 +910,14 @@ const EnemyEditor: React.FC<{
           onClick={() => {
             if (!cfg.id.trim() || !cfg.name.trim()) {
               toast.error("Enemy ID and name are required");
+              return;
+            }
+            const spriteErr = validateOptionalUrl(
+              "spriteUrl",
+              cfg.spriteUrl[0] ?? "",
+            );
+            if (spriteErr) {
+              toast.error(spriteErr);
               return;
             }
             onSave(cfg);
@@ -952,6 +1041,10 @@ const RegionEditor: React.FC<{
           </div>
         </div>
       </div>
+      <p style={{ color: "#6a6070", fontSize: 10, margin: "0 0 10px" }}>
+        {ELIGIBILITY_BAND_HINT} Region effects apply only while the player level
+        is inside this band.
+      </p>
 
       <p style={{ ...sectionHeadStyle, marginTop: 8 }}>
         Battle Effects ({cfg.battleEffects.length})
@@ -1402,7 +1495,7 @@ const SpriteEditorForm: React.FC<{
               flexShrink: 0,
             }}
           >
-            {previewUrl ? (
+            {previewUrl && !unsafeUrl(previewUrl) ? (
               <img
                 src={previewUrl}
                 alt="preview"
@@ -1458,9 +1551,7 @@ const SpriteEditorForm: React.FC<{
             lineHeight: 1.45,
           }}
         >
-          Custom Visual Override — paste hosted PNG/WebP URLs (square pixel art,
-          one frame per facing). Empty URLs are valid: the chess-piece Default
-          Pixel Visual stays the active fallback. No file upload yet.
+          {PLAYER_SPRITE_URL_HONESTY}
         </p>
         <div
           style={{
@@ -1591,10 +1682,19 @@ const SpriteList: React.FC<{
   saving: boolean;
   onSave: (c: PlayerSpriteConfig) => void;
   onDelete: (id: string) => void;
-}> = ({ sprites, loading, saving, onSave, onDelete }) => {
+  onEditorOpenChange?: (id: string | null) => void;
+}> = ({ sprites, loading, saving, onSave, onDelete, onEditorOpenChange }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingCfg, setEditingCfg] = useState<PlayerSpriteConfig | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const visibleSprites = sprites.filter((s) =>
+    matchesQuery(query, s.name, s.id, s.characterPieceType),
+  );
+
+  useEffect(() => {
+    onEditorOpenChange?.(editingCfg ? (selectedId ?? "__new__") : null);
+  }, [editingCfg, selectedId, onEditorOpenChange]);
 
   const selectSprite = (s: PlayerSpriteConfig) => {
     setSelectedId(s.id);
@@ -1679,6 +1779,19 @@ const SpriteList: React.FC<{
             + New
           </Btn>
         </div>
+        <div style={{ padding: "8px 16px 0" }}>
+          <CatalogNote>
+            Catalog only. WorldExploration never reads getPlayerSpriteConfigs —
+            characters keep the Default Pixel Visual until a renderer is wired.
+            Custom URLs are optional and not mandatory for new pieces.
+          </CatalogNote>
+          <ListSearch
+            value={query}
+            onChange={setQuery}
+            placeholder="Filter characters…"
+            ocid="admin.sprites.search_input"
+          />
+        </div>
 
         {/* List */}
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
@@ -1714,7 +1827,21 @@ const SpriteList: React.FC<{
             </div>
           )}
 
-          {sprites.map((s, i) => {
+          {!loading && sprites.length > 0 && visibleSprites.length === 0 && (
+            <div
+              data-ocid="admin.sprites.no_match"
+              style={{
+                textAlign: "center",
+                padding: "24px 16px",
+                color: "#6a6070",
+                fontSize: 12,
+              }}
+            >
+              No characters match “{query}”
+            </div>
+          )}
+
+          {visibleSprites.map((s, i) => {
             const isActive = selectedId === s.id;
             const thumb = s.frontUrl[0];
             return (
@@ -1941,7 +2068,11 @@ const EnemyList: React.FC<{
   onDelete: (id: string) => void;
 }> = ({ enemies, loading, onAdd, onEdit, onDelete }) => {
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const pending = enemies.find((e) => e.id === confirmId);
+  const visible = enemies.filter((e) =>
+    matchesQuery(query, e.name, e.id, e.regions.join(" ")),
+  );
   return (
     <div style={{ padding: 20 }}>
       <div
@@ -1950,6 +2081,8 @@ const EnemyList: React.FC<{
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 16,
+          gap: 12,
+          flexWrap: "wrap",
         }}
       >
         <div>
@@ -1966,12 +2099,27 @@ const EnemyList: React.FC<{
           </h3>
           <p style={{ color: "#8a8090", fontSize: 11, margin: "3px 0 0" }}>
             {enemies.length} enemi{enemies.length === 1 ? "y" : "es"} configured
+            {query.trim() ? ` · ${visible.length} shown` : ""}
           </p>
         </div>
-        <Btn variant="gold" onClick={onAdd} ocid="admin.enemies.add_button">
-          + Add Enemy
-        </Btn>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <ListSearch
+            value={query}
+            onChange={setQuery}
+            placeholder="Filter by name, id, region…"
+            ocid="admin.enemies.search_input"
+          />
+          <Btn variant="gold" onClick={onAdd} ocid="admin.enemies.add_button">
+            + Add Enemy
+          </Btn>
+        </div>
       </div>
+      <CatalogNote>
+        Canister catalog only. Overworld spawn still uses player-relative tiers
+        and chess-piece pixels — saving a row here does not change encounter
+        packs. Custom visual URL is optional; empty keeps the Default Pixel
+        Visual.
+      </CatalogNote>
 
       {loading && (
         <div
@@ -2007,104 +2155,123 @@ const EnemyList: React.FC<{
         </div>
       )}
 
-      {enemies.map((e, i) => (
-        <PanelCard key={e.id}>
-          <div
-            data-ocid={`admin.enemies.item.${i + 1}`}
-            style={{
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              padding: "10px 14px",
-            }}
-          >
+      {!loading && enemies.length > 0 && visible.length === 0 && (
+        <div
+          data-ocid="admin.enemies.no_match"
+          style={{
+            textAlign: "center",
+            padding: "24px 0",
+            color: "#6a6070",
+            fontSize: 12,
+          }}
+        >
+          No enemies match “{query}”
+        </div>
+      )}
+
+      {visible.map((e, i) => {
+        const visualCopy = enemyVisualStatusCopy(
+          spriteUrlIsStored(e.spriteUrl),
+        );
+        return (
+          <PanelCard key={e.id}>
             <div
+              data-ocid={`admin.enemies.item.${i + 1}`}
               style={{
-                width: 36,
-                height: 36,
-                background: `linear-gradient(135deg, ${C.bg0}, ${C.bg3})`,
-                border: `1px solid ${C.goldDim}`,
-                borderRadius: 6,
                 display: "flex",
+                gap: 12,
                 alignItems: "center",
-                justifyContent: "center",
-                fontSize: 18,
-                flexShrink: 0,
+                padding: "10px 14px",
               }}
             >
-              👾
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
-                  color: "#c0ccd8",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  marginBottom: 2,
-                }}
-              >
-                {e.name || e.id}
-              </div>
-              <div
-                style={{
+                  width: 36,
+                  height: 36,
+                  background: `linear-gradient(135deg, ${C.bg0}, ${C.bg3})`,
+                  border: `1px solid ${C.goldDim}`,
+                  borderRadius: 6,
                   display: "flex",
-                  gap: 8,
-                  flexWrap: "wrap",
                   alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 18,
+                  flexShrink: 0,
                 }}
               >
-                {[
-                  [
-                    `Lv ${String(e.levelMin)}–${String(e.levelMax)}`,
-                    C.goldBright,
-                  ],
-                  [`HP ${String(e.hp)}`, C.red],
-                  [`AP ${String(e.ap)}`, C.blue],
-                  [`MP ${String(e.mp)}`, C.green],
-                  [`Init ${String(e.initStat)}`, C.dim],
-                  [
-                    e.spriteUrl[0] ? "Custom visual" : "Default pixel visual",
-                    e.spriteUrl[0] ? C.gold : C.green,
-                  ],
-                ].map(([label, color]) => (
-                  <span
-                    key={label}
-                    style={{
-                      background: `${color}18`,
-                      border: `1px solid ${color}44`,
-                      borderRadius: 20,
-                      padding: "1px 7px",
-                      fontSize: 10,
-                      color,
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    {label}
-                  </span>
-                ))}
+                👾
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    color: "#c0ccd8",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    marginBottom: 2,
+                  }}
+                >
+                  {e.name || e.id}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
+                  {[
+                    [
+                      `Lv ${String(e.levelMin)}–${String(e.levelMax)}`,
+                      C.goldBright,
+                    ],
+                    [`HP ${String(e.hp)}`, C.red],
+                    [`AP ${String(e.ap)}`, C.blue],
+                    [`MP ${String(e.mp)}`, C.green],
+                    [`Init ${String(e.initStat)}`, C.dim],
+                    [
+                      visualCopy.chip,
+                      visualCopy.storedNotRendered ? C.dim : C.green,
+                    ],
+                  ].map(([label, color]) => (
+                    <span
+                      key={label}
+                      style={{
+                        background: `${color}18`,
+                        border: `1px solid ${color}44`,
+                        borderRadius: 20,
+                        padding: "1px 7px",
+                        fontSize: 10,
+                        color,
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn
+                  variant="ghost"
+                  small
+                  onClick={() => onEdit(e.id)}
+                  ocid={`admin.enemies.edit_button.${i + 1}`}
+                >
+                  Edit
+                </Btn>
+                <Btn
+                  variant="red"
+                  small
+                  onClick={() => setConfirmId(e.id)}
+                  ocid={`admin.enemies.delete_button.${i + 1}`}
+                >
+                  ×
+                </Btn>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Btn
-                variant="ghost"
-                small
-                onClick={() => onEdit(e.id)}
-                ocid={`admin.enemies.edit_button.${i + 1}`}
-              >
-                Edit
-              </Btn>
-              <Btn
-                variant="red"
-                small
-                onClick={() => setConfirmId(e.id)}
-                ocid={`admin.enemies.delete_button.${i + 1}`}
-              >
-                ×
-              </Btn>
-            </div>
-          </div>
-        </PanelCard>
-      ))}
+          </PanelCard>
+        );
+      })}
       {confirmId && (
         <ConfirmDialog
           title={`Delete ${pending?.name || pending?.id || "enemy"}?`}
@@ -2131,7 +2298,9 @@ const RegionList: React.FC<{
   onDelete: (id: string) => void;
 }> = ({ regions, loading, onAdd, onEdit, onDelete }) => {
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const pending = regions.find((r) => r.id === confirmId);
+  const visible = regions.filter((r) => matchesQuery(query, r.name, r.id));
   return (
     <div style={{ padding: 20 }}>
       <div
@@ -2140,6 +2309,8 @@ const RegionList: React.FC<{
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 16,
+          gap: 12,
+          flexWrap: "wrap",
         }}
       >
         <div>
@@ -2156,12 +2327,27 @@ const RegionList: React.FC<{
           </h3>
           <p style={{ color: "#8a8090", fontSize: 11, margin: "3px 0 0" }}>
             {regions.length} region{regions.length === 1 ? "" : "s"} defined
+            {query.trim() ? ` · ${visible.length} shown` : ""}
           </p>
         </div>
-        <Btn variant="gold" onClick={onAdd} ocid="admin.regions.add_button">
-          + Add Region
-        </Btn>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <ListSearch
+            value={query}
+            onChange={setQuery}
+            placeholder="Filter by name or id…"
+            ocid="admin.regions.search_input"
+          />
+          <Btn variant="gold" onClick={onAdd} ocid="admin.regions.add_button">
+            + Add Region
+          </Btn>
+        </div>
       </div>
+      <CatalogNote>
+        Catalog only. Saving a region does not change map tiles, hazards, or
+        combat. WorldExploration loads the list and matches player level, then
+        discards battle effects and background color. Level min/max is an
+        eligibility band, not a career cap.
+      </CatalogNote>
 
       {loading && (
         <div
@@ -2195,7 +2381,21 @@ const RegionList: React.FC<{
         </div>
       )}
 
-      {regions.map((r, i) => (
+      {!loading && regions.length > 0 && visible.length === 0 && (
+        <div
+          data-ocid="admin.regions.no_match"
+          style={{
+            textAlign: "center",
+            padding: "24px 0",
+            color: "#6a6070",
+            fontSize: 12,
+          }}
+        >
+          No regions match “{query}”
+        </div>
+      )}
+
+      {visible.map((r, i) => (
         <PanelCard key={r.id}>
           <div
             data-ocid={`admin.regions.item.${i + 1}`}
@@ -3344,6 +3544,24 @@ const SpellEditor: React.FC<{
               toast.error("Spell ID and name are required");
               return;
             }
+            const spellErr = validateSpellConfig({
+              id: cfg.id,
+              name: cfg.name,
+              apCost: Number(cfg.apCost),
+              minRange: Number(cfg.minRange ?? 0),
+              maxRange: Number(cfg.maxRange ?? cfg.range ?? 0),
+              spellType: cfg.spellType ?? "damage",
+              effectType: cfg.effectType,
+              effectCategory: cfg.effectCategory ?? "damage",
+              isSummon: cfg.isSummon,
+              summonAI: cfg.summonAI,
+              summonLifespan: cfg.summonLifespan,
+              summonUnitDef: cfg.summonUnitDef,
+            });
+            if (spellErr) {
+              toast.error(spellErr);
+              return;
+            }
             onSave(cfg);
           }}
           ocid="admin.spell.save_button"
@@ -3373,7 +3591,11 @@ const SpellList: React.FC<{
   onDelete: (id: string) => void;
 }> = ({ spells, loading, onAdd, onEdit, onDelete }) => {
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const pending = spells.find((s) => s.id === confirmId);
+  const visible = spells.filter((s) =>
+    matchesQuery(query, s.name, s.id, s.effectType, s.spellType),
+  );
   return (
     <div style={{ padding: 20 }}>
       <div
@@ -3382,6 +3604,8 @@ const SpellList: React.FC<{
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 16,
+          gap: 12,
+          flexWrap: "wrap",
         }}
       >
         <div>
@@ -3398,12 +3622,27 @@ const SpellList: React.FC<{
           </h3>
           <p style={{ color: "#8a8090", fontSize: 11, margin: "3px 0 0" }}>
             {spells.length} spell{spells.length === 1 ? "" : "s"} configured
+            {query.trim() ? ` · ${visible.length} shown` : ""}
           </p>
         </div>
-        <Btn variant="gold" onClick={onAdd} ocid="admin.spells.add_button">
-          + Add Spell
-        </Btn>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <ListSearch
+            value={query}
+            onChange={setQuery}
+            placeholder="Filter by name, id, type…"
+            ocid="admin.spells.search_input"
+          />
+          <Btn variant="gold" onClick={onAdd} ocid="admin.spells.add_button">
+            + Add Spell
+          </Btn>
+        </div>
       </div>
+      <CatalogNote>
+        Cooldown and multi-target round-trip via adapter. Summon metadata is
+        seeded on new drafts and saved when present, but this editor has no
+        summon controls. Swap, Barrier, Trap, DoT, and buff numeric flags are
+        frontend-only and drop on reload. minLevel is not enforced at hydrate.
+      </CatalogNote>
 
       {loading && (
         <div
@@ -3439,7 +3678,21 @@ const SpellList: React.FC<{
         </div>
       )}
 
-      {spells.map((s, i) => (
+      {!loading && spells.length > 0 && visible.length === 0 && (
+        <div
+          data-ocid="admin.spells.no_match"
+          style={{
+            textAlign: "center",
+            padding: "24px 0",
+            color: "#6a6070",
+            fontSize: 12,
+          }}
+        >
+          No spells match “{query}”
+        </div>
+      )}
+
+      {visible.map((s, i) => (
         <PanelCard key={s.id}>
           <div
             data-ocid={`admin.spells.item.${i + 1}`}
@@ -3601,14 +3854,19 @@ const TierConfigTab: React.FC = () => {
       toast.error(tierErr);
       return;
     }
+    if (!actor) {
+      toast.error("Backend actor not available");
+      return;
+    }
     try {
+      const result = await (
+        actor as unknown as backendInterface
+      ).adminSetTierSpawnConfig({
+        ...cfg,
+        tierSize: BigInt(cfg.tierSize),
+      } as never);
+      assertAdminCmdOk(result, "adminSetTierSpawnConfig");
       localStorage.setItem("pbv_tier_spawn_config", JSON.stringify(cfg));
-      if (actor) {
-        await (actor as unknown as backendInterface).adminSetTierSpawnConfig({
-          ...cfg,
-          tierSize: BigInt(cfg.tierSize),
-        } as any);
-      }
       toast.success("Tier spawn config saved!");
     } catch (err) {
       toast.error(`Failed to save config: ${String(err)}`);
@@ -3936,7 +4194,7 @@ const SettingsTab: React.FC = () => {
       {
         onSuccess: () => {
           toast.success(
-            "Admin role transferred! The new admin must log in to activate.",
+            `Admin role granted to ${targetPrincipal.trim()}. Your admin access is unchanged.`,
           );
           setTargetPrincipal("");
           setConfirmText("");
@@ -3969,6 +4227,12 @@ const SettingsTab: React.FC = () => {
       >
         Manage admin permissions and game settings.
       </p>
+      <CatalogNote>
+        Role transfer uses assignUserRole. Canister also has rollback
+        (LevelUp/Game/Tier/Palette/BossRush), getAdminAuditLog, setAppVersion /
+        setChangelog, and getBannedPrincipals — none of those have editors on
+        this tab.
+      </CatalogNote>
 
       <p style={sectionHeadStyle}>Transfer Admin Role</p>
       <div
@@ -4047,63 +4311,119 @@ const SettingsTab: React.FC = () => {
   );
 };
 
+const DEFAULT_LEVEL_UP_DRAFT = {
+  maxSpellRange: 5,
+  spellRangeGrowthLevels: 10,
+  spellFailBaseChance: 20,
+  spellFailReductionPerLevel: 0.1,
+  statGrowthPercent: 5,
+  apMpLevelThreshold: 25,
+  spellLevelingBaseCost: 10,
+  spellLevelingCostMultiplier: 2,
+  spellDmgGrowthPercent: 3,
+};
+
 // ── LevelUpConfigPanel (part of Settings) ─────────────────────────────────────────────
 const LevelUpConfigPanel: React.FC = () => {
   const { actor } = useActor();
   const [cfg, setCfg] = React.useState(() => {
     try {
       const raw = localStorage.getItem("pbv_levelup_config");
-      if (raw)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const apMp = Number(
+          parsed.apMpLevelThreshold ??
+            parsed.apMpGrowthEveryNLevels ??
+            DEFAULT_LEVEL_UP_DRAFT.apMpLevelThreshold,
+        );
         return {
-          maxSpellRange: 5,
-          spellRangeGrowthLevels: 10,
-          spellFailBaseChance: 20,
-          spellFailReductionPerLevel: 0.1,
-          ...JSON.parse(raw),
+          ...DEFAULT_LEVEL_UP_DRAFT,
+          ...parsed,
+          apMpLevelThreshold: apMp,
         };
+      }
     } catch {
       /* ignore */
     }
-    return {
-      maxSpellRange: 5,
-      spellRangeGrowthLevels: 10,
-      spellFailBaseChance: 20,
-      spellFailReductionPerLevel: 0.1,
-    };
+    return { ...DEFAULT_LEVEL_UP_DRAFT };
   });
   const [saved, setSaved] = React.useState(false);
 
+  React.useEffect(() => {
+    if (!actor) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await (
+          actor as unknown as backendInterface
+        ).getLevelUpConfig();
+        if (cancelled || !remote) return;
+        setCfg((prev) => ({
+          ...prev,
+          maxSpellRange: Number(remote.maxSpellRange ?? prev.maxSpellRange),
+          spellRangeGrowthLevels: Number(
+            remote.spellRangeGrowthLevels ?? prev.spellRangeGrowthLevels,
+          ),
+          spellFailBaseChance: Number(
+            remote.spellFailBaseChance ?? prev.spellFailBaseChance,
+          ),
+          spellFailReductionPerLevel: Number(
+            remote.spellFailReductionPerLevel ??
+              prev.spellFailReductionPerLevel,
+          ),
+          statGrowthPercent: Number(
+            remote.statGrowthPercent ?? prev.statGrowthPercent,
+          ),
+          apMpLevelThreshold: Number(
+            remote.apMpLevelThreshold ?? prev.apMpLevelThreshold,
+          ),
+          spellLevelingBaseCost: Number(
+            remote.spellLevelingBaseCost ?? prev.spellLevelingBaseCost,
+          ),
+          spellLevelingCostMultiplier: Number(
+            remote.spellLevelingCostMultiplier ??
+              prev.spellLevelingCostMultiplier,
+          ),
+          spellDmgGrowthPercent: Number(
+            remote.spellDmgGrowthPercent ?? prev.spellDmgGrowthPercent,
+          ),
+        }));
+      } catch {
+        /* keep localStorage draft */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [actor]);
+
   const handleSave = async () => {
+    const payload = toBackendLevelUpConfig(cfg);
     const err = validateLevelUpConfig({
-      statGrowthPercent: Number(cfg.statGrowthPercent ?? 5),
-      apMpLevelThreshold: Number(cfg.apMpLevelThreshold ?? 25),
-      spellLevelingBaseCost: Number(cfg.spellLevelingBaseCost ?? 10),
-      spellLevelingCostMultiplier: Number(cfg.spellLevelingCostMultiplier ?? 2),
-      spellDmgGrowthPercent: Number(cfg.spellDmgGrowthPercent ?? 3),
-      maxSpellRange: Number(cfg.maxSpellRange ?? 5),
-      spellRangeGrowthLevels: Number(cfg.spellRangeGrowthLevels ?? 10),
-      spellFailBaseChance: Number(cfg.spellFailBaseChance ?? 20),
-      spellFailReductionPerLevel: Number(cfg.spellFailReductionPerLevel ?? 0.1),
+      statGrowthPercent: Number(payload.statGrowthPercent),
+      apMpLevelThreshold: Number(payload.apMpLevelThreshold),
+      spellLevelingBaseCost: Number(payload.spellLevelingBaseCost),
+      spellLevelingCostMultiplier: payload.spellLevelingCostMultiplier,
+      spellDmgGrowthPercent: Number(payload.spellDmgGrowthPercent),
+      maxSpellRange: Number(payload.maxSpellRange),
+      spellRangeGrowthLevels: Number(payload.spellRangeGrowthLevels),
+      spellFailBaseChance: payload.spellFailBaseChance,
+      spellFailReductionPerLevel: payload.spellFailReductionPerLevel,
     });
     if (err) {
       toast.error(err);
       return;
     }
-    localStorage.setItem("pbv_levelup_config", JSON.stringify(cfg));
+    if (!actor) {
+      toast.error("Backend actor not available");
+      return;
+    }
     try {
-      if (actor) {
-        await (actor as unknown as backendInterface).adminSetLevelUpConfig({
-          maxSpellRange: BigInt(cfg.maxSpellRange),
-          spellRangeGrowthLevels: BigInt(cfg.spellRangeGrowthLevels),
-          spellFailBaseChance: cfg.spellFailBaseChance,
-          spellFailReductionPerLevel: cfg.spellFailReductionPerLevel,
-          statGrowthPercent: BigInt(5),
-          apMpLevelThreshold: BigInt(25),
-          spellLevelingBaseCost: BigInt(10),
-          spellLevelingCostMultiplier: 2,
-          spellDmgGrowthPercent: BigInt(3),
-        });
-      }
+      const result = await (
+        actor as unknown as backendInterface
+      ).adminSetLevelUpConfig(payload);
+      assertAdminCmdOk(result, "adminSetLevelUpConfig");
+      localStorage.setItem("pbv_levelup_config", JSON.stringify(cfg));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (_e) {
@@ -4122,6 +4442,20 @@ const LevelUpConfigPanel: React.FC = () => {
       }}
     >
       <p style={sectionHeadStyle}>Spell System Config</p>
+      <p
+        style={{
+          color: "#6a6070",
+          fontSize: 11,
+          marginBottom: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        All nine LevelUpConfig fields are editable. Save writes the full
+        canister payload (no hardcoded growth/cost clobber). Live combat still
+        hydrates fail/range from pbv_levelup_config until WorldExploration calls
+        getLevelUpConfig. Cost multiplier is stored; upgradeSpell still charges
+        base × 2^level. No player level cap.
+      </p>
       <div
         style={{
           display: "grid",
@@ -4225,7 +4559,129 @@ const LevelUpConfigPanel: React.FC = () => {
             data-ocid="admin.levelup.failred_input"
           />
           <p style={{ color: "#6a6070", fontSize: 10, margin: "3px 0 0" }}>
-            0.1 = reaches 0% at level 200
+            0.1 = −0.1% fail per player level. No career cap; do not treat 200
+            as a ceiling.
+          </p>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label htmlFor="levelup.statgrowth" style={labelStyle}>
+            Stat Growth % / Level
+          </label>
+          <input
+            id="levelup.statgrowth"
+            type="number"
+            min={1}
+            max={50}
+            value={cfg.statGrowthPercent}
+            onChange={(e) =>
+              setCfg((p: typeof cfg) => ({
+                ...p,
+                statGrowthPercent: Math.max(1, Number(e.target.value) || 5),
+              }))
+            }
+            style={inputStyle()}
+            data-ocid="admin.levelup.statgrowth_input"
+          />
+          <p style={{ color: "#6a6070", fontSize: 10, margin: "3px 0 0" }}>
+            All stats grow this percent per character level (default 5)
+          </p>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label htmlFor="levelup.apmp" style={labelStyle}>
+            +1 AP/MP Every N Levels
+          </label>
+          <input
+            id="levelup.apmp"
+            type="number"
+            min={1}
+            max={100}
+            value={cfg.apMpLevelThreshold}
+            onChange={(e) =>
+              setCfg((p: typeof cfg) => ({
+                ...p,
+                apMpLevelThreshold: Math.max(1, Number(e.target.value) || 25),
+              }))
+            }
+            style={inputStyle()}
+            data-ocid="admin.levelup.apmp_input"
+          />
+          <p style={{ color: "#6a6070", fontSize: 10, margin: "3px 0 0" }}>
+            Canister field apMpLevelThreshold (default 25)
+          </p>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label htmlFor="levelup.spellbase" style={labelStyle}>
+            Spell Leveling Base Cost
+          </label>
+          <input
+            id="levelup.spellbase"
+            type="number"
+            min={1}
+            value={cfg.spellLevelingBaseCost}
+            onChange={(e) =>
+              setCfg((p: typeof cfg) => ({
+                ...p,
+                spellLevelingBaseCost: Math.max(
+                  1,
+                  Number(e.target.value) || 10,
+                ),
+              }))
+            }
+            style={inputStyle()}
+            data-ocid="admin.levelup.spellbase_input"
+          />
+          <p style={{ color: "#6a6070", fontSize: 10, margin: "3px 0 0" }}>
+            upgradeSpell charges base × 2^level (default 10)
+          </p>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label htmlFor="levelup.spellmult" style={labelStyle}>
+            Spell Cost Multiplier
+          </label>
+          <input
+            id="levelup.spellmult"
+            type="number"
+            min={1}
+            max={10}
+            step={0.1}
+            value={cfg.spellLevelingCostMultiplier}
+            onChange={(e) =>
+              setCfg((p: typeof cfg) => ({
+                ...p,
+                spellLevelingCostMultiplier: Math.max(
+                  1,
+                  Number(e.target.value) || 2,
+                ),
+              }))
+            }
+            style={inputStyle()}
+            data-ocid="admin.levelup.spellmult_input"
+          />
+          <p style={{ color: "#6a6070", fontSize: 10, margin: "3px 0 0" }}>
+            Stored on canister; live debit still uses 2^level
+          </p>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label htmlFor="levelup.spelldmg" style={labelStyle}>
+            Spell Damage Growth %
+          </label>
+          <input
+            id="levelup.spelldmg"
+            type="number"
+            min={0}
+            max={50}
+            value={cfg.spellDmgGrowthPercent}
+            onChange={(e) =>
+              setCfg((p: typeof cfg) => ({
+                ...p,
+                spellDmgGrowthPercent: Math.max(0, Number(e.target.value) || 3),
+              }))
+            }
+            style={inputStyle()}
+            data-ocid="admin.levelup.spelldmg_input"
+          />
+          <p style={{ color: "#6a6070", fontSize: 10, margin: "3px 0 0" }}>
+            Per spell-level damage increase (default 3)
           </p>
         </div>
       </div>
@@ -4268,12 +4724,14 @@ const VisualsTab: React.FC = () => {
 
   const handleSave = async () => {
     const palette = slots.filter((s) => s.enabled).map((s) => s.color);
-    localStorage.setItem("paperVertexPalette", JSON.stringify(palette));
-    localStorage.setItem("pbv_color_palette", JSON.stringify(palette));
+    const blob = JSON.stringify(palette);
     try {
-      await (actor as unknown as backendInterface).adminSetColorPalette(
-        JSON.stringify(palette),
-      );
+      const result = await (
+        actor as unknown as backendInterface
+      ).adminSetColorPalette(blob);
+      assertAdminCmdOk(result, "adminSetColorPalette");
+      localStorage.setItem("paperVertexPalette", blob);
+      localStorage.setItem("pbv_color_palette", blob);
       setSaved(true);
       setSaveError(null);
       setTimeout(() => setSaved(false), 2000);
@@ -4460,9 +4918,13 @@ const VisualsTab: React.FC = () => {
             onClick={handleReset}
             ocid="admin.visuals.reset_button"
           >
-            Reset to Random
+            Reset editor to Random
           </Btn>
         </div>
+        <p style={{ color: "#6a6070", fontSize: 10, margin: 0 }}>
+          Reset only clears this editor and local cache. Click Save Palette to
+          publish the canister-live fallback.
+        </p>
         {saveError && (
           <p
             data-ocid="admin.visuals.save_error"
@@ -4478,30 +4940,19 @@ const VisualsTab: React.FC = () => {
 
 // ── ModifierEditor ─────────────────────────────────────────────────────────────────────
 
+const LEGACY_MODIFIER_TYPES = [
+  {
+    value: "lava_fields",
+    label: "Lava Fields — legacy id (no engine hook)",
+  },
+  { value: "ice_fields", label: "Ice Fields — legacy id (no engine hook)" },
+  { value: "spike_pit", label: "Spike Pit — legacy id (no engine hook)" },
+  { value: "custom", label: "Custom — free-text id (no engine hook)" },
+];
+
 const MODIFIER_TYPES = [
-  { value: "slime_flood", label: "Slime Flood — Double MP cost movement" },
-  { value: "paper_windstorm", label: "Paper Windstorm — 50% miss on ranged" },
-  { value: "gravity_well", label: "Gravity Well — Push/pull double range" },
-  { value: "blood_moon", label: "Blood Moon — +25% dmg, -25% heal" },
-  { value: "fog_of_war", label: "Fog of War — Enemies hidden beyond 3 tiles" },
-  { value: "thorned_ground", label: "Thorned Ground — 5 dmg per extra tile" },
-  {
-    value: "arcane_surge",
-    label: "Arcane Surge — -1 AP cost, +15% fail chance",
-  },
-  { value: "mirror_field", label: "Mirror Field — 20% reflect single-target" },
-  {
-    value: "frozen_terrain",
-    label: "Frozen Terrain — Double MP cost + LoS +1 range",
-  },
-  { value: "plague_zone", label: "Plague Zone — -2 HP every turn start" },
-  { value: "time_warp", label: "Time Warp — 15s timer instead of 30s" },
-  { value: "void_rift", label: "Void Rift — Random tile teleports + -3 HP" },
-  // EXP5: Hazard tile modifiers
-  { value: "lava_fields", label: "Lava Fields — Spawn 3-8 lava hazard tiles" },
-  { value: "ice_fields", label: "Ice Fields — Spawn 3-8 ice hazard tiles" },
-  { value: "spike_pit", label: "Spike Pit — Spawn 3-8 spike hazard tiles" },
-  { value: "custom", label: "Custom" },
+  ...listAdminModifierTypeOptions(),
+  ...LEGACY_MODIFIER_TYPES,
 ];
 
 const ModifierEditor: React.FC<{
@@ -4509,7 +4960,8 @@ const ModifierEditor: React.FC<{
   onSave: (c: MapModifierConfig) => void;
   onCancel: () => void;
   saving: boolean;
-}> = ({ initial, onSave, onCancel, saving }) => {
+  idLocked?: boolean;
+}> = ({ initial, onSave, onCancel, saving, idLocked }) => {
   const [cfg, setCfg] = React.useState<MapModifierConfig>(initial);
   const set = <K extends keyof MapModifierConfig>(
     k: K,
@@ -4532,6 +4984,12 @@ const ModifierEditor: React.FC<{
           onChange={(v) => set("id", v)}
           ocid="admin.modifier.id_input"
           placeholder="slime_flood"
+          disabled={idLocked}
+          hint={
+            idLocked
+              ? "ID is locked after create — changing it would orphan the live record."
+              : undefined
+          }
         />
         <Field
           label="Name"
@@ -4565,6 +5023,12 @@ const ModifierEditor: React.FC<{
                 {t.label}
               </option>
             ))}
+            {!MODIFIER_TYPES.some((t) => t.value === cfg.modifierType) &&
+              cfg.modifierType && (
+                <option value={cfg.modifierType}>
+                  {cfg.modifierType} — saved id (not in registry)
+                </option>
+              )}
           </select>
         </div>
       </div>
@@ -4581,6 +5045,11 @@ const ModifierEditor: React.FC<{
       >
         <p style={{ ...sectionHeadStyle, margin: "0 0 8px" }}>
           Global Modifier Roll Settings
+        </p>
+        <p style={{ color: C.dim, fontSize: 10, margin: "0 0 8px" }}>
+          Only this modifier&apos;s weight (triggerChance) persists on the
+          canister. Global trigger % and second-modifier % are not Candid fields
+          — reload resets them to engine defaults 20 / 50.
         </p>
         <div
           style={{
@@ -4680,13 +5149,19 @@ const ModifierEditor: React.FC<{
           htmlFor="admin.modifier.active_checkbox"
           style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}
         >
-          Active on all maps
+          Eligible for portal modifier roll
         </label>
       </div>
       <div style={{ display: "flex", gap: 10 }}>
         <Btn
           variant="gold"
-          onClick={() => onSave(cfg)}
+          onClick={() => {
+            if (!cfg.id.trim() || !cfg.name.trim()) {
+              toast.error("Modifier ID and name are required");
+              return;
+            }
+            onSave(cfg);
+          }}
           ocid="admin.modifier.save_button"
         >
           {saving ? "Saving\u2026" : "Save Modifier"}
@@ -4712,30 +5187,13 @@ const newAchievement = (): AchievementConfig => ({
   active: true,
 });
 
-const ACHIEVEMENT_CONDITIONS = [
-  "first_battle_win",
-  "survive_1hp",
-  "spell_level_5",
-  "doka_1000",
-  "explore_25_maps",
-  "betrayal_witness",
-  "leader_slayer",
-  "jackpot_heal",
-  "loot_10_doka",
-  "double_betrayal",
-  "level_10",
-  "spell_master_8",
-  "critical_5_in_battle",
-  "pacifist_run",
-  "doka_10000",
-];
-
 const AchievementEditor: React.FC<{
   initial: AchievementConfig;
   onSave: (c: AchievementConfig) => void;
   onCancel: () => void;
   saving: boolean;
-}> = ({ initial, onSave, onCancel, saving }) => {
+  idLocked?: boolean;
+}> = ({ initial, onSave, onCancel, saving, idLocked }) => {
   const [cfg, setCfg] = React.useState<AchievementConfig>(initial);
   const set = <K extends keyof AchievementConfig>(
     k: K,
@@ -4767,6 +5225,12 @@ const AchievementEditor: React.FC<{
           onChange={(v) => set("id", v)}
           ocid="admin.achievement.id_input"
           placeholder="first_battle_win"
+          disabled={idLocked}
+          hint={
+            idLocked
+              ? "ID is locked after create — changing it would orphan the live record."
+              : undefined
+          }
         />
         <Field
           label="Name"
@@ -4819,7 +5283,7 @@ const AchievementEditor: React.FC<{
               { ...inputStyle(), appearance: "none" } as React.CSSProperties
             }
           >
-            {ACHIEVEMENT_CONDITIONS.map((c) => (
+            {KNOWN_ACHIEVEMENT_CONDITIONS.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
@@ -4860,6 +5324,11 @@ const AchievementEditor: React.FC<{
           onClick={() => {
             if (!cfg.id.trim() || !cfg.name.trim()) {
               toast.error("Achievement ID and name are required");
+              return;
+            }
+            const err = validateAchievementConfig(cfg);
+            if (err) {
+              toast.error(err);
               return;
             }
             onSave(cfg);
@@ -4909,7 +5378,6 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
   const delSpellMut = useAdminDeleteSpellConfig();
   const setModifierMut = useAdminSetMapModifier();
   const delModifierMut = useAdminDeleteMapModifier();
-  const purchaseQ = useGetPurchaseRecords();
   const setGameConfigMut = useAdminSetGameConfig();
   const achievementQ = useGetAchievementConfigs();
   const setAchievementMut = useAdminSetAchievementConfig();
@@ -4938,9 +5406,12 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
     }
   });
   const [bossRushSaved, setBossRushSaved] = useState(false);
-  const [shopPrincipalId, setShopPrincipalId] = useState("");
+  const [shopGrantPrincipalId, setShopGrantPrincipalId] = useState("");
+  const [shopBanPrincipalId, setShopBanPrincipalId] = useState("");
   const [shopDokaAmount, setShopDokaAmount] = useState<number>(0);
-  const [shopConfirm, setShopConfirm] = useState<null | "grant" | "ban">(null);
+  const [shopConfirm, setShopConfirm] = useState<
+    null | "grant" | "ban" | "unban"
+  >(null);
   const [pendingTab, setPendingTab] = useState<
     AdminDashboardState["tab"] | "close" | null
   >(null);
@@ -4949,6 +5420,11 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
     id: string;
     label: string;
   } | null>(null);
+  const [modifierQuery, setModifierQuery] = useState("");
+  const [achievementQuery, setAchievementQuery] = useState("");
+  const [nameQuery, setNameQuery] = useState("");
+  const [bannedPrincipals, setBannedPrincipals] = useState<string[]>([]);
+  const [bannedLoadError, setBannedLoadError] = useState<string | null>(null);
 
   const { actor: adminActor } = useActor();
 
@@ -4982,12 +5458,31 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
     if (gameConfigQ.data) setGameConfigDraft(gameConfigQ.data);
   }, [gameConfigQ.data]);
 
+  const loadBanned = useCallback(async () => {
+    if (!adminActor || !isAdmin) return;
+    try {
+      const result = await (
+        adminActor as unknown as backendInterface
+      ).getBannedPrincipals();
+      const list = readPrincipalListResult(result, "getBannedPrincipals");
+      setBannedPrincipals(list);
+      setBannedLoadError(null);
+    } catch (err) {
+      setBannedLoadError(err instanceof Error ? err.message : String(err));
+    }
+  }, [adminActor, isAdmin]);
+
+  useEffect(() => {
+    void loadBanned();
+  }, [loadBanned]);
+
   const hasOpenEditor =
     dashState.editingEnemyId != null ||
     dashState.editingRegionId != null ||
     dashState.editingSpellId != null ||
     dashState.editingModifierId != null ||
-    dashState.editingAchievementId != null;
+    dashState.editingAchievementId != null ||
+    dashState.editingSpriteId != null;
 
   const applyTab = (tab: AdminDashboardState["tab"]) =>
     setDashState((p) => ({
@@ -5022,6 +5517,17 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
   const sprites = spriteQ.data ?? [];
   const spells = spellQ.data ?? [];
   const modifiers = modifierQ.data ?? [];
+  const visibleModifiers = modifiers.filter((m) =>
+    matchesQuery(modifierQuery, m.name, m.id, m.modifierType),
+  );
+  const achievements = achievementQ.data ?? [];
+  const visibleAchievements = achievements.filter((a) =>
+    matchesQuery(achievementQuery, a.name, a.id, a.condition),
+  );
+  const enemyNames = enemyNamesQ.data ?? [];
+  const visibleEnemyNames = enemyNames.filter((n) =>
+    matchesQuery(nameQuery, n),
+  );
 
   const editingEnemy =
     dashState.editingEnemyId === "__new__"
@@ -5080,8 +5586,9 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
             Admin Access Required
           </h2>
           <p style={{ color: "#8a8090", fontSize: 13, marginBottom: 24 }}>
-            Only the first player who logged in has admin access. Log in with
-            the admin Internet Identity to use this dashboard.
+            Access is role-based. The first Internet Identity to call
+            getUserRole becomes admin; Settings can grant more. Log in with an
+            admin identity to continue.
           </p>
           <Btn
             variant="ghost"
@@ -5215,7 +5722,7 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
       {shopConfirm === "grant" && (
         <ConfirmDialog
           title={`Grant ${shopDokaAmount} Doka?`}
-          body={`This credits ${shopDokaAmount} Doka to ${shopPrincipalId} immediately. There is no undo.`}
+          body={`This credits ${shopDokaAmount} Doka to ${shopGrantPrincipalId} immediately. There is no undo.`}
           confirmLabel="Grant Doka"
           ocidPrefix="admin.shop.grant"
           onCancel={() => setShopConfirm(null)}
@@ -5223,15 +5730,16 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
             setShopConfirm(null);
             void (async () => {
               try {
-                await (
+                const result = await (
                   adminActor as unknown as backendInterface
                 ).adminAddDokaToUser(
-                  Principal.fromText(shopPrincipalId),
+                  Principal.fromText(shopGrantPrincipalId),
                   BigInt(Number(shopDokaAmount) || 0),
                   null,
                 );
+                assertAdminCmdOk(result, "adminAddDokaToUser");
                 toast.success(
-                  `Granted ${shopDokaAmount} Doka to ${shopPrincipalId}`,
+                  `Granted ${shopDokaAmount} Doka to ${shopGrantPrincipalId}`,
                 );
                 setSaveStatus("Saved");
                 setTimeout(() => setSaveStatus(null), 3000);
@@ -5245,8 +5753,8 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
       )}
       {shopConfirm === "ban" && (
         <ConfirmDialog
-          title={`Ban ${shopPrincipalId}?`}
-          body="Banned principals fail purchases, buffs, achievement claims, boss rush, and Doka awards. Achievement progress for this principal is cleared."
+          title={`Ban ${shopBanPrincipalId}?`}
+          body="Banned principals fail purchases, buffs, achievement claims, boss rush, and Doka awards. Existing achievement progress is kept so claimed rewards cannot be claimed again after unban."
           confirmLabel="Ban player"
           ocidPrefix="admin.shop.ban"
           onCancel={() => setShopConfirm(null)}
@@ -5254,14 +5762,43 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
             setShopConfirm(null);
             void (async () => {
               try {
-                await (
+                const result = await (
                   adminActor as unknown as backendInterface
-                ).adminBanAccount(Principal.fromText(shopPrincipalId));
-                toast.success(`Banned ${shopPrincipalId}`);
+                ).adminBanAccount(Principal.fromText(shopBanPrincipalId));
+                assertAdminCmdOk(result, "adminBanAccount");
+                toast.success(`Banned ${shopBanPrincipalId}`);
                 setSaveStatus("Saved");
                 setTimeout(() => setSaveStatus(null), 3000);
+                void loadBanned();
               } catch (err) {
                 toast.error(`Failed to ban player: ${String(err)}`);
+                setSaveStatus(`Save failed: ${String(err)}`);
+              }
+            })();
+          }}
+        />
+      )}
+      {shopConfirm === "unban" && (
+        <ConfirmDialog
+          title={`Unban ${shopBanPrincipalId}?`}
+          body="This restores purchases, buffs, achievement claims, boss rush, and Doka awards for this principal. Achievement progress was kept on ban, so claimed rewards stay claimed."
+          confirmLabel="Unban player"
+          ocidPrefix="admin.shop.unban"
+          onCancel={() => setShopConfirm(null)}
+          onConfirm={() => {
+            setShopConfirm(null);
+            void (async () => {
+              try {
+                const result = await (
+                  adminActor as unknown as backendInterface
+                ).adminUnbanAccount(Principal.fromText(shopBanPrincipalId));
+                assertAdminCmdOk(result, "adminUnbanAccount");
+                toast.success(`Unbanned ${shopBanPrincipalId}`);
+                setSaveStatus("Saved");
+                setTimeout(() => setSaveStatus(null), 3000);
+                void loadBanned();
+              } catch (err) {
+                toast.error(`Failed to unban player: ${String(err)}`);
                 setSaveStatus(`Save failed: ${String(err)}`);
               }
             })();
@@ -5399,6 +5936,8 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
               ["Regions", regions.length],
               ["Sprites", sprites.length],
               ["Spells", spells.length],
+              ["Achievements", (achievementQ.data ?? []).length],
+              ["Modifiers", modifiers.length],
             ].map(([label, count]) => (
               <div
                 key={label}
@@ -5548,6 +6087,13 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                   sprites={sprites}
                   loading={spriteQ.isLoading}
                   saving={setSpriteMut.isPending || delSpriteMut.isPending}
+                  onEditorOpenChange={(id) =>
+                    setDashState((p) =>
+                      p.editingSpriteId === id
+                        ? p
+                        : { ...p, editingSpriteId: id },
+                    )
+                  }
                   onSave={(cfg) => {
                     const walkErr =
                       validateWalkFrameUrls(cfg.walkFramesFront) ??
@@ -5634,326 +6180,7 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
           {dashState.tab === "tiers" && <TierConfigTab />}
 
           {/* PURCHASES */}
-          {dashState.tab === "purchases" && (
-            <div data-ocid="admin.purchases_tab" style={{ padding: 20 }}>
-              {purchaseQ.isError && (
-                <TabErrorBanner
-                  tabName="Purchases"
-                  onRetry={() => purchaseQ.refetch()}
-                />
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 20,
-                }}
-              >
-                <div>
-                  <h3
-                    style={{
-                      color: "#f0c44a",
-                      margin: 0,
-                      fontSize: 16,
-                      fontWeight: 800,
-                      letterSpacing: "0.06em",
-                    }}
-                  >
-                    Purchase Records
-                  </h3>
-                  <p
-                    style={{
-                      color: "#8a8090",
-                      fontSize: 11,
-                      margin: "4px 0 0",
-                    }}
-                  >
-                    All Doka shop orders, customer data &amp; proof-of-address
-                    documents
-                  </p>
-                </div>
-                <div
-                  style={{
-                    background: `${C.gold}18`,
-                    border: `1px solid ${C.goldDim}`,
-                    borderRadius: 20,
-                    padding: "4px 12px",
-                    fontSize: 11,
-                    color: "#f0c44a",
-                    fontWeight: 700,
-                  }}
-                >
-                  {purchaseQ.data?.length ?? 0} records
-                </div>
-              </div>
-
-              {purchaseQ.isLoading && (
-                <div
-                  data-ocid="admin.purchases.loading_state"
-                  style={{
-                    textAlign: "center",
-                    padding: 40,
-                    color: "#8a8090",
-                    fontSize: 13,
-                  }}
-                >
-                  Loading purchase records…
-                </div>
-              )}
-
-              {!purchaseQ.isLoading && (purchaseQ.data?.length ?? 0) === 0 && (
-                <div
-                  data-ocid="admin.purchases.empty_state"
-                  style={{
-                    textAlign: "center",
-                    padding: "40px 0",
-                    color: "#6a6070",
-                    fontSize: 13,
-                    border: `1px dashed ${C.dimmer}`,
-                    borderRadius: 8,
-                  }}
-                >
-                  <div style={{ fontSize: 28, marginBottom: 8 }}>🧾</div>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                    No purchase records yet
-                  </div>
-                  <div style={{ fontSize: 11 }}>
-                    Records appear here once players make purchases
-                  </div>
-                </div>
-              )}
-
-              {(purchaseQ.data ?? []).length > 0 && (
-                <div style={{ overflowX: "auto" }}>
-                  <table
-                    style={{
-                      width: "100%",
-                      borderCollapse: "collapse",
-                      fontSize: 11,
-                    }}
-                  >
-                    <thead>
-                      <tr style={{ borderBottom: `1px solid ${C.goldDim}` }}>
-                        {[
-                          "#",
-                          "Customer",
-                          "Email",
-                          "Address",
-                          "Amount",
-                          "Price",
-                          "Status",
-                          "Date",
-                          "Proof",
-                        ].map((h) => (
-                          <th
-                            key={h}
-                            style={{
-                              color: "#f0c44a",
-                              fontWeight: 800,
-                              textAlign: "left",
-                              padding: "8px 10px",
-                              letterSpacing: "0.08em",
-                              fontSize: 9,
-                              textTransform: "uppercase",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(purchaseQ.data ?? []).map((rec, i) => (
-                        <tr
-                          key={rec.id ?? i}
-                          data-ocid={`admin.purchases.item.${i + 1}`}
-                          style={{
-                            borderBottom: `1px solid ${C.goldDim}22`,
-                            background: i % 2 === 0 ? C.bg0 : C.bg1,
-                          }}
-                        >
-                          <td
-                            style={{
-                              padding: "8px 10px",
-                              color: "#8a8090",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {i + 1}
-                          </td>
-                          <td
-                            style={{
-                              padding: "8px 10px",
-                              color: "#c0ccd8",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {[
-                              rec.customerData?.firstName,
-                              rec.customerData?.lastName,
-                            ]
-                              .filter(Boolean)
-                              .join(" ") || "—"}
-                          </td>
-                          <td style={{ padding: "8px 10px", color: C.dim }}>
-                            {rec.customerData?.email || "—"}
-                          </td>
-                          <td
-                            style={{
-                              padding: "8px 10px",
-                              color: "#8a8090",
-                              maxWidth: 160,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {[
-                              rec.customerData?.address,
-                              rec.customerData?.city,
-                              rec.customerData?.postalCode,
-                              rec.customerData?.country,
-                            ]
-                              .filter(Boolean)
-                              .join(", ") || "—"}
-                          </td>
-                          <td
-                            style={{
-                              padding: "8px 10px",
-                              color: "#f0c44a",
-                              fontWeight: 700,
-                              textAlign: "right",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {rec.dokaAmount?.toLocaleString() ?? "—"} 💰
-                          </td>
-                          <td
-                            style={{
-                              padding: "8px 10px",
-                              color: "#c0ccd8",
-                              textAlign: "right",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            €{rec.priceEur ?? "—"}
-                          </td>
-                          <td
-                            style={{
-                              padding: "8px 10px",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            <span
-                              style={{
-                                background:
-                                  rec.status === "paid" ||
-                                  rec.status === "completed"
-                                    ? `${C.green}22`
-                                    : `${C.gold}22`,
-                                border: `1px solid ${
-                                  rec.status === "paid" ||
-                                  rec.status === "completed"
-                                    ? C.green
-                                    : C.gold
-                                }44`,
-                                color:
-                                  rec.status === "paid" ||
-                                  rec.status === "completed"
-                                    ? C.green
-                                    : C.gold,
-                                fontSize: 9,
-                                padding: "2px 7px",
-                                borderRadius: 20,
-                                fontWeight: 700,
-                              }}
-                            >
-                              {rec.status ?? "pending"}
-                            </span>
-                          </td>
-                          <td
-                            style={{
-                              padding: "8px 10px",
-                              color: "#8a8090",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {rec.timestamp
-                              ? new Date(rec.timestamp).toLocaleString(
-                                  "en-GB",
-                                  { dateStyle: "short", timeStyle: "short" },
-                                )
-                              : "—"}
-                          </td>
-                          <td style={{ padding: "8px 10px" }}>
-                            {rec.proofFileUrl ||
-                            rec.proofOfAddressBase64 ||
-                            rec.proofOfAddressName?.startsWith("http") ? (
-                              <button
-                                type="button"
-                                data-ocid={`admin.purchases.view_proof_button.${i + 1}`}
-                                onClick={() => {
-                                  if (rec.proofFileUrl) {
-                                    window.open(
-                                      rec.proofFileUrl,
-                                      "_blank",
-                                      "noopener,noreferrer",
-                                    );
-                                    return;
-                                  }
-                                  if (
-                                    rec.proofOfAddressName?.startsWith("http")
-                                  ) {
-                                    window.open(
-                                      rec.proofOfAddressName,
-                                      "_blank",
-                                      "noopener,noreferrer",
-                                    );
-                                    return;
-                                  }
-                                  const mime = rec.proofOfAddressName?.endsWith(
-                                    ".pdf",
-                                  )
-                                    ? "application/pdf"
-                                    : "image/jpeg";
-                                  const url = `data:${mime};base64,${rec.proofOfAddressBase64}`;
-                                  const a = document.createElement("a");
-                                  a.href = url;
-                                  a.download =
-                                    rec.proofOfAddressName ??
-                                    `proof_${rec.id ?? i}.jpg`;
-                                  a.click();
-                                }}
-                                style={{
-                                  background: `${C.blue}22`,
-                                  border: `1px solid ${C.blue}55`,
-                                  borderRadius: 4,
-                                  color: C.blue,
-                                  fontSize: 10,
-                                  padding: "3px 8px",
-                                  cursor: "pointer",
-                                  fontWeight: 700,
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                📄 View
-                              </button>
-                            ) : (
-                              <span style={{ color: "#6a6070", fontSize: 10 }}>
-                                None
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
+          {dashState.tab === "purchases" && <AdminGameKeyPurchases />}
 
           {/* MAP MODIFIERS */}
           {dashState.tab === "modifiers" && (
@@ -5964,6 +6191,11 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                   onRetry={() => modifierQ.refetch()}
                 />
               )}
+              <CatalogNote>
+                Active means eligible for the portal roll, not always-on every
+                map. Registry ids are selectable. Global/second chances shown in
+                the editor are not stored on MapModifierConfig.
+              </CatalogNote>
               {/* Doka Spawn Config */}
               <div
                 data-ocid="admin.doka_spawn_config"
@@ -6153,20 +6385,31 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                   >
                     {modifiers.length} modifier
                     {modifiers.length === 1 ? "" : "s"} defined
+                    {modifierQuery.trim()
+                      ? ` · ${visibleModifiers.length} shown`
+                      : ""}
                   </p>
                 </div>
-                <Btn
-                  variant="gold"
-                  onClick={() =>
-                    setDashState((p) => ({
-                      ...p,
-                      editingModifierId: "__new__",
-                    }))
-                  }
-                  ocid="admin.modifiers.add_button"
-                >
-                  + Add Modifier
-                </Btn>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <ListSearch
+                    value={modifierQuery}
+                    onChange={setModifierQuery}
+                    placeholder="Filter modifiers…"
+                    ocid="admin.modifiers.search_input"
+                  />
+                  <Btn
+                    variant="gold"
+                    onClick={() =>
+                      setDashState((p) => ({
+                        ...p,
+                        editingModifierId: "__new__",
+                      }))
+                    }
+                    ocid="admin.modifiers.add_button"
+                  >
+                    + Add Modifier
+                  </Btn>
+                </div>
               </div>
 
               {dashState.editingModifierId ? (
@@ -6179,6 +6422,7 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                   }}
                 >
                   <ModifierEditor
+                    idLocked={dashState.editingModifierId !== "__new__"}
                     initial={
                       dashState.editingModifierId === "__new__"
                         ? {
@@ -6256,7 +6500,22 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                       </div>
                     </div>
                   )}
-                  {modifiers.map((mod, i) => (
+                  {!modifierQ.isLoading &&
+                    modifiers.length > 0 &&
+                    visibleModifiers.length === 0 && (
+                      <div
+                        data-ocid="admin.modifiers.no_match"
+                        style={{
+                          textAlign: "center",
+                          padding: "24px 0",
+                          color: "#6a6070",
+                          fontSize: 12,
+                        }}
+                      >
+                        No modifiers match “{modifierQuery}”
+                      </div>
+                    )}
+                  {visibleModifiers.map((mod, i) => (
                     <PanelCard key={mod.id}>
                       <div
                         data-ocid={`admin.modifiers.item.${i + 1}`}
@@ -6389,26 +6648,38 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                     }}
                   >
                     Configure player achievements and Doka rewards
+                    {achievementQuery.trim()
+                      ? ` · ${visibleAchievements.length} shown`
+                      : ""}
                   </p>
                 </div>
-                <Btn
-                  variant="gold"
-                  small
-                  ocid="admin.achievements.add_button"
-                  onClick={() =>
-                    setDashState((p) => ({
-                      ...p,
-                      editingAchievementId: "__new__",
-                    }))
-                  }
-                >
-                  + New Achievement
-                </Btn>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <ListSearch
+                    value={achievementQuery}
+                    onChange={setAchievementQuery}
+                    placeholder="Filter achievements…"
+                    ocid="admin.achievements.search_input"
+                  />
+                  <Btn
+                    variant="gold"
+                    small
+                    ocid="admin.achievements.add_button"
+                    onClick={() =>
+                      setDashState((p) => ({
+                        ...p,
+                        editingAchievementId: "__new__",
+                      }))
+                    }
+                  >
+                    + New Achievement
+                  </Btn>
+                </div>
               </div>
 
               {/* Editor */}
               {dashState.editingAchievementId && (
                 <AchievementEditor
+                  idLocked={dashState.editingAchievementId !== "__new__"}
                   initial={
                     dashState.editingAchievementId === "__new__"
                       ? newAchievement()
@@ -6445,30 +6716,43 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                       Loading…
                     </div>
                   )}
+                  {!achievementQ.isLoading && achievements.length === 0 && (
+                    <div
+                      data-ocid="admin.achievements.empty_state"
+                      style={{
+                        textAlign: "center",
+                        padding: "40px 0",
+                        color: "#6a6070",
+                        fontSize: 13,
+                        border: `1px dashed ${C.dimmer}`,
+                        borderRadius: 8,
+                      }}
+                    >
+                      <div style={{ fontSize: 28, marginBottom: 8 }}>🏆</div>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                        No achievements yet
+                      </div>
+                      <div style={{ fontSize: 11 }}>
+                        Add achievements with Doka rewards for players to unlock
+                      </div>
+                    </div>
+                  )}
                   {!achievementQ.isLoading &&
-                    (achievementQ.data ?? []).length === 0 && (
+                    achievements.length > 0 &&
+                    visibleAchievements.length === 0 && (
                       <div
-                        data-ocid="admin.achievements.empty_state"
+                        data-ocid="admin.achievements.no_match"
                         style={{
                           textAlign: "center",
-                          padding: "40px 0",
+                          padding: "24px 0",
                           color: "#6a6070",
-                          fontSize: 13,
-                          border: `1px dashed ${C.dimmer}`,
-                          borderRadius: 8,
+                          fontSize: 12,
                         }}
                       >
-                        <div style={{ fontSize: 28, marginBottom: 8 }}>🏆</div>
-                        <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                          No achievements yet
-                        </div>
-                        <div style={{ fontSize: 11 }}>
-                          Add achievements with Doka rewards for players to
-                          unlock
-                        </div>
+                        No achievements match “{achievementQuery}”
                       </div>
                     )}
-                  {(achievementQ.data ?? []).map((ach, i) => (
+                  {visibleAchievements.map((ach, i) => (
                     <PanelCard key={ach.id}>
                       <div
                         data-ocid={`admin.achievements.item.${i + 1}`}
@@ -6585,25 +6869,29 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
           {dashState.tab === "bosses" && <BossesTab spells={spells} />}
 
           {dashState.tab === "ads" && (
-            <div style={{ padding: "24px" }}>
-              <h2
+            <div data-ocid="admin.ads_tab" style={{ padding: 20 }}>
+              <h3
                 style={{
-                  color: "#ff4444",
-                  fontSize: "20px",
-                  marginBottom: "24px",
+                  color: C.gold,
+                  margin: "0 0 6px",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  letterSpacing: "0.06em",
                 }}
               >
                 Advertisement Boxes
-              </h2>
+              </h3>
               <p
                 style={{
-                  color: "#aaa",
-                  marginBottom: "24px",
-                  fontSize: "14px",
+                  color: C.dim,
+                  fontSize: 11,
+                  marginBottom: 18,
+                  lineHeight: 1.5,
                 }}
               >
-                These 3 ad boxes appear on the login page. Upload an image URL
-                and click-through link for each box you want to show.
+                Three landing-page slots. Empty image + empty link is valid: the
+                box stays hidden. Save requires both URLs; use Clear to revert
+                to the hidden default.
               </p>
               <AdBoxEditor index={0} />
               <AdBoxEditor index={1} />
@@ -6612,40 +6900,84 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
           )}
 
           {dashState.tab === "shop" && (
-            <div data-ocid="admin.shop_tab" className="p-4 space-y-6">
-              <h2 className="text-xl font-bold text-red-400">
-                Shop Administration
-              </h2>
-              <div className="bg-gray-800 p-4 rounded">
-                <h3 className="font-semibold mb-2">Payment Links</h3>
-                <p className="text-gray-400 text-sm">
-                  Configure payment links in the shop settings below.
+            <div data-ocid="admin.shop_tab" style={{ padding: 20 }}>
+              <h3
+                style={{
+                  color: C.gold,
+                  margin: "0 0 6px",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  letterSpacing: "0.06em",
+                }}
+              >
+                Shop / Wallet Ops
+              </h3>
+              <CatalogNote>
+                Players buy Doka with a Mollie payment + GameKey request.
+                Incoming requests live on the Purchases tab. Grant and ban use
+                separate principal fields and write live — there is no undo.
+              </CatalogNote>
+              <div
+                style={{
+                  background:
+                    "linear-gradient(160deg,#48343c 0%,#241a20 40%,#14101a 100%)",
+                  border: `1px solid ${C.goldDim}`,
+                  borderRadius: 8,
+                  padding: "14px 16px",
+                  marginBottom: 16,
+                }}
+              >
+                <p style={sectionHeadStyle}>GameKey / Mollie</p>
+                <p style={{ color: C.dim, fontSize: 11, margin: 0 }}>
+                  Multi-tier Doka packages are retired. Players pay any euro
+                  amount on Mollie, submit a request, and redeem a 120-character
+                  GameKey after you approve it on Purchases (1000 Doka = 10€).
                 </p>
               </div>
-              <div className="bg-gray-800 p-4 rounded">
-                <h3 className="font-semibold mb-2">Manual Doka Grant</h3>
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm"
-                    placeholder="Principal ID"
-                    value={shopPrincipalId}
-                    onChange={(e) => setShopPrincipalId(e.target.value)}
-                  />
-                  <input
-                    className="w-24 bg-gray-700 px-3 py-2 rounded text-sm"
-                    placeholder="Amount"
-                    type="number"
-                    value={shopDokaAmount}
-                    onChange={(e) =>
-                      setShopDokaAmount(Number.parseInt(e.target.value) || 0)
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm"
+              <div
+                style={{
+                  background:
+                    "linear-gradient(160deg,#48343c 0%,#241a20 40%,#14101a 100%)",
+                  border: `1px solid ${C.goldDim}`,
+                  borderRadius: 8,
+                  padding: "14px 16px",
+                  marginBottom: 16,
+                }}
+              >
+                <p style={sectionHeadStyle}>Manual Doka Grant</p>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    alignItems: "flex-end",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <Field
+                      label="Grant principal"
+                      value={shopGrantPrincipalId}
+                      onChange={setShopGrantPrincipalId}
+                      ocid="admin.shop.grant_principal_input"
+                      placeholder="Principal to credit"
+                    />
+                  </div>
+                  <div style={{ width: 120 }}>
+                    <Field
+                      label="Amount"
+                      type="number"
+                      value={String(shopDokaAmount)}
+                      onChange={(v) =>
+                        setShopDokaAmount(Number.parseInt(v) || 0)
+                      }
+                      ocid="admin.shop.grant_amount_input"
+                    />
+                  </div>
+                  <Btn
+                    variant="gold"
                     onClick={() => {
                       const grantErr = validateDokaGrant(shopDokaAmount);
-                      if (!shopPrincipalId || grantErr) {
+                      if (!shopGrantPrincipalId || grantErr) {
                         toast.error(grantErr ?? "Enter a principal and amount");
                         return;
                       }
@@ -6655,70 +6987,163 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                       }
                       setShopConfirm("grant");
                     }}
+                    ocid="admin.shop.grant_button"
                   >
                     Grant
-                  </button>
+                  </Btn>
                 </div>
               </div>
-              <div className="bg-gray-800 p-4 rounded">
-                <h3 className="font-semibold mb-2">Ban / Unban Player</h3>
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm"
-                    placeholder="Principal ID"
-                    value={shopPrincipalId}
-                    onChange={(e) => setShopPrincipalId(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="bg-red-800 hover:bg-red-900 px-4 py-2 rounded text-sm"
+              <div
+                style={{
+                  background:
+                    "linear-gradient(160deg,#48343c 0%,#241a20 40%,#14101a 100%)",
+                  border: `1px solid ${C.red}44`,
+                  borderRadius: 8,
+                  padding: "14px 16px",
+                }}
+              >
+                <p style={sectionHeadStyle}>Ban / Unban Player</p>
+                <p
+                  style={{
+                    color: C.dim,
+                    fontSize: 10,
+                    margin: "0 0 10px",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Separate from the grant field so a credit cannot become a ban.
+                </p>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    alignItems: "flex-end",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <Field
+                      label="Ban / unban principal"
+                      value={shopBanPrincipalId}
+                      onChange={setShopBanPrincipalId}
+                      ocid="admin.shop.ban_principal_input"
+                      placeholder="Principal to ban or unban"
+                    />
+                  </div>
+                  <Btn
+                    variant="red"
                     onClick={() => {
-                      if (!shopPrincipalId) {
+                      if (!shopBanPrincipalId) {
                         toast.error("Enter a principal ID");
                         return;
                       }
                       setShopConfirm("ban");
                     }}
+                    ocid="admin.shop.ban_button"
                   >
                     Ban
-                  </button>
-                  <button
-                    type="button"
-                    className="bg-green-800 hover:bg-green-900 px-4 py-2 rounded text-sm"
+                  </Btn>
+                  <Btn
+                    variant="blue"
                     onClick={() => {
-                      if (!shopPrincipalId) {
+                      if (!shopBanPrincipalId) {
                         toast.error("Enter a principal ID");
                         return;
                       }
-                      (async () => {
-                        try {
-                          await (
-                            adminActor as unknown as backendInterface
-                          ).adminUnbanAccount(
-                            Principal.fromText(shopPrincipalId),
-                          );
-                          toast.success(`Unbanned ${shopPrincipalId}`);
-                          setSaveStatus("Saved");
-                          setTimeout(() => setSaveStatus(null), 3000);
-                        } catch (err) {
-                          toast.error(`Failed to unban player: ${String(err)}`);
-                          setSaveStatus(`Save failed: ${String(err)}`);
-                        }
-                      })();
+                      setShopConfirm("unban");
                     }}
+                    ocid="admin.shop.unban_button"
                   >
                     Unban
-                  </button>
+                  </Btn>
+                </div>
+              </div>
+              <div
+                style={{
+                  background:
+                    "linear-gradient(160deg,#48343c 0%,#241a20 40%,#14101a 100%)",
+                  border: `1px solid ${C.goldDim}`,
+                  borderRadius: 8,
+                  padding: "14px 16px",
+                  marginTop: 16,
+                }}
+              >
+                <p style={sectionHeadStyle}>Banned principals</p>
+                <p
+                  style={{
+                    color: C.dim,
+                    fontSize: 10,
+                    margin: "0 0 10px",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Live list from getBannedPrincipals. Click a principal to fill
+                  the unban field. Empty is valid — nobody is banned.
+                </p>
+                {bannedLoadError && (
+                  <p
+                    data-ocid="admin.shop.banned.error"
+                    style={{ color: C.red, fontSize: 11, margin: "0 0 8px" }}
+                  >
+                    {bannedLoadError}
+                  </p>
+                )}
+                {!bannedLoadError && bannedPrincipals.length === 0 && (
+                  <p
+                    data-ocid="admin.shop.banned.empty"
+                    style={{ color: C.green, fontSize: 11, margin: 0 }}
+                  >
+                    No banned principals (valid default)
+                  </p>
+                )}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {bannedPrincipals.map((p, i) => (
+                    <button
+                      key={p}
+                      type="button"
+                      data-ocid={`admin.shop.banned.pick_button.${i + 1}`}
+                      onClick={() => setShopBanPrincipalId(p)}
+                      style={{
+                        background: `${C.red}18`,
+                        border: `1px solid ${C.red}44`,
+                        color: C.silver,
+                        borderRadius: 20,
+                        padding: "4px 10px",
+                        fontSize: 10,
+                        cursor: "pointer",
+                        maxWidth: 280,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                      title={p}
+                    >
+                      {p}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
           )}
 
           {dashState.tab === "bossRush" && (
-            <div data-ocid="admin.boss_rush_tab" className="p-4 space-y-4">
-              <h2 className="text-xl font-bold text-red-400">
+            <div data-ocid="admin.boss_rush_tab" style={{ padding: 20 }}>
+              <h3
+                style={{
+                  color: C.gold,
+                  margin: "0 0 6px",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  letterSpacing: "0.06em",
+                }}
+              >
                 Boss Rush Configuration
-              </h2>
+              </h3>
+              <CatalogNote>
+                Enable/reward toggles write opaque JSON. Live rooms come from
+                BOSS_RUSH_ROOMS; only parsed.rewardMultiplier is read. Room 10
+                lists Weeping Pawn; live room 9 uses weeping_pawn_2. Canister
+                save publishes immediately — this is not a browser draft.
+              </CatalogNote>
               {[
                 { room: 1, a: "Pale Archbishop", b: "Weeping Pawn" },
                 { room: 2, a: "Crimson Countess", b: "Fetid Rook" },
@@ -6741,13 +7166,33 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                 return (
                   <div
                     key={room}
-                    className="bg-gray-800 p-3 rounded flex items-center gap-4"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "10px 14px",
+                      marginBottom: 8,
+                      background:
+                        "linear-gradient(160deg,#48343c 0%,#241a20 40%,#14101a 100%)",
+                      border: `1px solid ${C.goldDim}`,
+                      borderRadius: 8,
+                    }}
                   >
-                    <span className="text-gray-400 w-8">R{room}</span>
-                    <span className="flex-1 text-sm">
+                    <span style={{ color: C.dim, width: 28, fontSize: 11 }}>
+                      R{room}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 12, color: C.silver }}>
                       {a} + {b}
                     </span>
-                    <label className="flex items-center gap-1 text-sm">
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11,
+                        color: C.dim,
+                      }}
+                    >
                       <input
                         type="checkbox"
                         checked={isEnabled}
@@ -6757,17 +7202,26 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                             [enabledKey]: e.target.checked,
                           }))
                         }
+                        style={{ accentColor: C.gold }}
                       />
                       Enabled
                     </label>
-                    <label className="flex items-center gap-1 text-sm">
-                      Reward:{" "}
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11,
+                        color: C.dim,
+                      }}
+                    >
+                      Reward
                       <input
                         type="number"
                         value={rewardVal}
                         step={0.5}
                         min={0.5}
-                        className="w-16 bg-gray-700 px-2 py-1 rounded text-sm"
+                        style={{ ...inputStyle(), width: 64, margin: 0 }}
                         onChange={(e) =>
                           setBossRushConfig((prev) => ({
                             ...prev,
@@ -6781,23 +7235,27 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                   </div>
                 );
               })}
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  data-ocid="admin.boss_rush_save_button"
-                  className="bg-red-700 hover:bg-red-800 px-4 py-2 rounded text-sm font-semibold"
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  marginTop: 8,
+                }}
+              >
+                <Btn
+                  variant="gold"
+                  ocid="admin.boss_rush_save_button"
                   onClick={() => {
-                    localStorage.setItem(
-                      "bossRushConfig",
-                      JSON.stringify(bossRushConfig),
-                    );
-                    (async () => {
+                    void (async () => {
                       try {
-                        await (
+                        const blob = JSON.stringify(bossRushConfig);
+                        const result = await (
                           adminActor as unknown as backendInterface
-                        ).adminSetBossRushConfig(
-                          JSON.stringify(bossRushConfig),
-                        );
+                        ).adminSetBossRushConfig(blob);
+                        assertAdminCmdOk(result, "adminSetBossRushConfig");
+                        localStorage.setItem("bossRushConfig", blob);
+                        toast.success("Boss Rush config published (live)");
                         setSaveStatus("Saved");
                         setTimeout(() => setSaveStatus(null), 3000);
                         setBossRushSaved(true);
@@ -6810,10 +7268,14 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                     })();
                   }}
                 >
-                  Save Boss Rush Config
-                </button>
+                  Publish Boss Rush
+                </Btn>
                 {bossRushSaved && (
-                  <span className="text-green-400 text-sm">Saved!</span>
+                  <span
+                    style={{ color: C.green, fontSize: 11, fontWeight: 700 }}
+                  >
+                    Live save committed
+                  </span>
                 )}
               </div>
             </div>
@@ -6858,6 +7320,12 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <ListSearch
+                    value={nameQuery}
+                    onChange={setNameQuery}
+                    placeholder="Filter names…"
+                    ocid="admin.names.search_input"
+                  />
                   <div
                     style={{
                       background: `${C.gold}18`,
@@ -6869,19 +7337,19 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                       fontWeight: 700,
                     }}
                   >
-                    {enemyNamesQ.data?.length ?? 0} names
+                    {enemyNames.length} names
+                    {nameQuery.trim() ? ` · ${visibleEnemyNames.length}` : ""}
                   </div>
-                  {(enemyNamesQ.data?.length ?? 0) === 0 &&
-                    !enemyNamesQ.isLoading && (
-                      <Btn
-                        variant="gold"
-                        small
-                        onClick={() => initDefaultNamesMut.mutate()}
-                        ocid="admin.names.init_defaults_button"
-                      >
-                        Load Defaults
-                      </Btn>
-                    )}
+                  {enemyNames.length === 0 && !enemyNamesQ.isLoading && (
+                    <Btn
+                      variant="gold"
+                      small
+                      onClick={() => initDefaultNamesMut.mutate()}
+                      ocid="admin.names.init_defaults_button"
+                    >
+                      Load Defaults
+                    </Btn>
+                  )}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
@@ -6947,32 +7415,44 @@ const AdminDashboard: React.FC<{ onBack: () => void; isAdmin?: boolean }> = ({
                   Loading names…
                 </div>
               )}
-              {!enemyNamesQ.isLoading &&
-                (enemyNamesQ.data?.length ?? 0) === 0 && (
-                  <div
-                    data-ocid="admin.names.empty_state"
-                    style={{
-                      textAlign: "center",
-                      padding: "40px 0",
-                      color: "#6a6070",
-                      fontSize: 13,
-                      border: `1px dashed ${C.dimmer}`,
-                      borderRadius: 8,
-                    }}
-                  >
-                    <div style={{ fontSize: 28, marginBottom: 8 }}>📛</div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                      No enemy names yet
-                    </div>
-                    <div style={{ fontSize: 11 }}>
-                      Click &ldquo;Load Defaults&rdquo; to pre-fill with 90
-                      ancient names.
-                    </div>
+              {!enemyNamesQ.isLoading && enemyNames.length === 0 && (
+                <div
+                  data-ocid="admin.names.empty_state"
+                  style={{
+                    textAlign: "center",
+                    padding: "40px 0",
+                    color: "#6a6070",
+                    fontSize: 13,
+                    border: `1px dashed ${C.dimmer}`,
+                    borderRadius: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>📛</div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                    No enemy names yet
                   </div>
-                )}
-              {(enemyNamesQ.data?.length ?? 0) > 0 && (
+                  <div style={{ fontSize: 11 }}>
+                    Click &ldquo;Load Defaults&rdquo; to pre-fill with 90
+                    ancient names.
+                  </div>
+                </div>
+              )}
+              {enemyNames.length > 0 && visibleEnemyNames.length === 0 && (
+                <div
+                  data-ocid="admin.names.no_match"
+                  style={{
+                    textAlign: "center",
+                    padding: "24px 0",
+                    color: "#6a6070",
+                    fontSize: 12,
+                  }}
+                >
+                  No names match “{nameQuery}”
+                </div>
+              )}
+              {visibleEnemyNames.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {(enemyNamesQ.data ?? []).map((name, i) => (
+                  {visibleEnemyNames.map((name, i) => (
                     <div
                       key={name}
                       data-ocid={`admin.names.item.${i + 1}`}
@@ -7091,6 +7571,11 @@ function PhaseEditor({
   spells: SpellConfig[];
   label: string;
 }) {
+  const [abilityQuery, setAbilityQuery] = React.useState("");
+  const visibleAbilities = ALL_ABILITIES.filter((a) =>
+    matchesQuery(abilityQuery, a, ABILITY_LABELS[a]),
+  );
+
   const toggleAbility = (a: BossAbility) => {
     const has = phase.specialAbilities.includes(a);
     onChange({
@@ -7186,10 +7671,18 @@ function PhaseEditor({
       </div>
 
       <p style={{ ...labelStyle, marginBottom: 6 }}>Special Abilities</p>
+      <div style={{ marginBottom: 8 }}>
+        <ListSearch
+          value={abilityQuery}
+          onChange={setAbilityQuery}
+          placeholder="Filter abilities…"
+          ocid="admin.bosses.ability_search"
+        />
+      </div>
       <div
         style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}
       >
-        {ALL_ABILITIES.map((a) => {
+        {visibleAbilities.map((a) => {
           const active = phase.specialAbilities.includes(a);
           return (
             <button
@@ -7262,6 +7755,10 @@ const BossesTab: React.FC<{ spells: SpellConfig[] }> = ({ spells }) => {
 
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [drafts, setDrafts] = React.useState<Record<string, BossConfig>>({});
+  const [confirmResetId, setConfirmResetId] = React.useState<string | null>(
+    null,
+  );
+  const [query, setQuery] = React.useState("");
 
   const getDraft = (id: string): BossConfig => {
     if (drafts[id]) return drafts[id];
@@ -7279,7 +7776,9 @@ const BossesTab: React.FC<{ spells: SpellConfig[] }> = ({ spells }) => {
   const handleSave = (id: string) => {
     setBossConfig.mutate(getDraft(id), {
       onSuccess: () => {
-        toast.success(`Boss "${getDraft(id).name}" saved!`);
+        toast.success(
+          `Boss "${getDraft(id).name}" draft saved in this browser only — not canister-live`,
+        );
         refetch();
       },
       onError: () => toast.error("Failed to save boss config"),
@@ -7301,6 +7800,11 @@ const BossesTab: React.FC<{ spells: SpellConfig[] }> = ({ spells }) => {
       },
     });
   };
+
+  const visibleBossIds = BOSS_IDS.filter((bossId) => {
+    const draft = getDraft(bossId);
+    return matchesQuery(query, draft.name, bossId, draft.pieceType);
+  });
 
   return (
     <div
@@ -7336,8 +7840,45 @@ const BossesTab: React.FC<{ spells: SpellConfig[] }> = ({ spells }) => {
           </p>
         </div>
       </div>
+      <div style={{ marginBottom: 12 }}>
+        <ListSearch
+          value={query}
+          onChange={setQuery}
+          placeholder="Filter bosses…"
+          ocid="admin.bosses.search_input"
+        />
+      </div>
 
-      {BOSS_IDS.map((bossId, idx) => {
+      {confirmResetId && (
+        <ConfirmDialog
+          title={`Reset ${getDraft(confirmResetId).name}?`}
+          body="This overwrites the browser-local draft with shipped defaults. It is still not canister-live."
+          confirmLabel="Reset draft"
+          ocidPrefix="admin.bosses.reset"
+          onCancel={() => setConfirmResetId(null)}
+          onConfirm={() => {
+            const id = confirmResetId;
+            setConfirmResetId(null);
+            handleReset(id);
+          }}
+        />
+      )}
+
+      {query.trim() && visibleBossIds.length === 0 && (
+        <div
+          data-ocid="admin.bosses.no_match"
+          style={{
+            textAlign: "center",
+            padding: "24px 0",
+            color: "#6a6070",
+            fontSize: 12,
+          }}
+        >
+          No bosses match “{query}”
+        </div>
+      )}
+
+      {visibleBossIds.map((bossId, idx) => {
         const draft = getDraft(bossId);
         const isOpen = expandedId === bossId;
 
@@ -7556,11 +8097,11 @@ const BossesTab: React.FC<{ spells: SpellConfig[] }> = ({ spells }) => {
                     onClick={() => handleSave(bossId)}
                     ocid={`admin.bosses.save_button.${idx + 1}`}
                   >
-                    Save Boss
+                    Save browser draft
                   </Btn>
                   <Btn
                     variant="ghost"
-                    onClick={() => handleReset(bossId)}
+                    onClick={() => setConfirmResetId(bossId)}
                     ocid={`admin.bosses.reset_button.${idx + 1}`}
                   >
                     Reset to Defaults
@@ -7580,6 +8121,7 @@ function AdBoxEditor({ index }: { index: number }) {
   const [imageUrl, setImageUrl] = React.useState("");
   const [linkUrl, setLinkUrl] = React.useState("");
   const [status, setStatus] = React.useState("");
+  const [confirmClear, setConfirmClear] = React.useState(false);
   React.useEffect(() => {
     if (actor) {
       (
@@ -7605,16 +8147,13 @@ function AdBoxEditor({ index }: { index: number }) {
       return;
     }
     try {
-      await (
-        actor as unknown as {
-          adminSetAdBox: (
-            i: bigint,
-            img: string,
-            link: string,
-          ) => Promise<void>;
-        }
-      ).adminSetAdBox(BigInt(index), imageUrl, linkUrl);
-      setStatus("Saved!");
+      const result = await (actor as unknown as backendInterface).adminSetAdBox(
+        BigInt(index),
+        imageUrl,
+        linkUrl,
+      );
+      assertAdminCmdOk(result, "adminSetAdBox");
+      setStatus("Saved");
       setTimeout(() => setStatus(""), 2000);
     } catch {
       setStatus("Error");
@@ -7622,107 +8161,111 @@ function AdBoxEditor({ index }: { index: number }) {
   };
   const clear = async () => {
     try {
-      await (
-        actor as unknown as { adminClearAdBox: (i: bigint) => Promise<void> }
+      const result = await (
+        actor as unknown as backendInterface
       ).adminClearAdBox(BigInt(index));
+      assertAdminCmdOk(result, "adminClearAdBox");
       setImageUrl("");
       setLinkUrl("");
-      setStatus("Cleared!");
+      setStatus("Hidden default");
       setTimeout(() => setStatus(""), 2000);
     } catch {
       setStatus("Error");
     }
   };
+  const hasCustom = Boolean(imageUrl.trim() || linkUrl.trim());
   return (
     <div
       style={{
-        background: "#1a0505",
-        border: "1px solid #4a0a0a",
-        borderRadius: "8px",
-        padding: "16px",
-        marginBottom: "16px",
+        background:
+          "linear-gradient(160deg,#48343c 0%,#241a20 40%,#14101a 100%)",
+        border: `1px solid ${C.goldDim}`,
+        borderRadius: 8,
+        padding: 16,
+        marginBottom: 16,
       }}
     >
-      <h3 style={{ color: "#ff6666", marginBottom: "12px" }}>
+      {confirmClear && (
+        <ConfirmDialog
+          title={`Clear ad box ${index + 1}?`}
+          body="This hides the landing-page slot immediately (valid default). The custom image and link are removed."
+          confirmLabel="Clear to hidden default"
+          ocidPrefix={`admin.ads.clear.${index + 1}`}
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={() => {
+            setConfirmClear(false);
+            void clear();
+          }}
+        />
+      )}
+      <h3
+        style={{
+          color: C.gold,
+          margin: "0 0 8px",
+          fontSize: 13,
+          fontWeight: 800,
+        }}
+      >
         Ad Box {index + 1}
       </h3>
+      <p
+        data-ocid={`admin.ads.visual_status.${index + 1}`}
+        style={{
+          color: hasCustom ? C.gold : C.green,
+          fontSize: 10,
+          fontWeight: 700,
+          margin: "0 0 8px",
+        }}
+      >
+        {hasCustom
+          ? "Custom Visual — override URLs set"
+          : "No custom ad — box hidden (valid default)"}
+      </p>
+      <p style={{ color: C.dimmer, fontSize: 10, margin: "0 0 10px" }}>
+        Hosted PNG/WebP, landscape ~4:3, https only. Paste URLs before Save.
+        Empty is valid — use Clear, do not treat empty as an error.
+      </p>
       {imageUrl && !unsafeUrl(imageUrl) && (
         <img
           src={imageUrl}
           alt="preview"
           style={{
-            width: "200px",
-            height: "150px",
+            width: 200,
+            height: 150,
             objectFit: "cover",
-            borderRadius: "4px",
-            marginBottom: "8px",
+            borderRadius: 4,
+            marginBottom: 8,
             display: "block",
+            border: `1px solid ${C.goldDim}`,
           }}
         />
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <input
           value={imageUrl}
           onChange={(e) => setImageUrl(e.target.value)}
-          placeholder="Image URL (https://...)"
-          style={{
-            background: "#0d0505",
-            border: "1px solid #4a0a0a",
-            color: "#fff",
-            padding: "8px",
-            borderRadius: "4px",
-            fontSize: "13px",
-          }}
+          placeholder="Image URL (https://…) — optional"
+          style={inputStyle()}
         />
         <input
           value={linkUrl}
           onChange={(e) => setLinkUrl(e.target.value)}
-          placeholder="Click-through URL (https://...)"
-          style={{
-            background: "#0d0505",
-            border: "1px solid #4a0a0a",
-            color: "#fff",
-            padding: "8px",
-            borderRadius: "4px",
-            fontSize: "13px",
-          }}
+          placeholder="Click-through URL (https://…) — optional"
+          style={inputStyle()}
         />
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <button
-            type="button"
-            onClick={save}
-            style={{
-              background: "#6b0000",
-              color: "#fff",
-              border: "none",
-              padding: "8px 16px",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontSize: "13px",
-            }}
-          >
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Btn variant="gold" small onClick={() => void save()}>
             Save
-          </button>
-          <button
-            type="button"
-            onClick={clear}
-            style={{
-              background: "#333",
-              color: "#fff",
-              border: "none",
-              padding: "8px 16px",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontSize: "13px",
-            }}
-          >
-            Clear
-          </button>
+          </Btn>
+          <Btn variant="ghost" small onClick={() => setConfirmClear(true)}>
+            Clear to default
+          </Btn>
           {status && (
             <span
               style={{
-                color: status.includes("Error") ? "#ff4444" : "#44ff44",
-                fontSize: "12px",
+                color: status.includes("Error") ? C.red : C.green,
+                fontSize: 11,
+                fontWeight: 700,
               }}
             >
               {status}

@@ -27,7 +27,8 @@
         "useExhaustiveDependencies": "error"
       },
       "suspicious": {
-        "noExplicitAny": "off"
+        "noExplicitAny": "off",
+        "noRedeclare": "error"
       },
       "style": {
         "useConst": "off",

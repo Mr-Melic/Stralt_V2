@@ -15,8 +15,12 @@
  * player (LoS, barriers, minRange) without changing the AP debit.
  */
 
+import { isActiveHostile } from "../engine/battleSetup.ts";
 import {
+  type TileCastableResult,
   type TileType,
+  chebyshevOnBoard,
+  isCasterTile,
   isTileCastableLive,
   shouldExecuteLiveCast,
 } from "../engine/targeting.ts";
@@ -28,10 +32,29 @@ export interface SummonKitCatalogSpell {
   apCost?: unknown;
   range?: unknown;
   maxRange?: number;
+  targetType?: string;
+  areaRadius?: number;
   summonUnitDef?: {
     pieceType?: string;
     summonKit?: string[];
   };
+}
+
+/**
+ * Chebyshev fast-fail used before the live gate. Area expansion tiles
+ * sit beyond caster range (range + areaRadius); `all` has no cap.
+ * Must never reject a tile `isTileCastableLive` would accept.
+ */
+export function summonControlRangeCap(
+  spell: Pick<SummonKitCatalogSpell, "targetType" | "areaRadius">,
+  range: number,
+): number {
+  const t = (spell.targetType ?? "enemy") as string;
+  if (t === "all") return Number.POSITIVE_INFINITY;
+  if (t === "area") {
+    return range + Math.max(0, Math.floor(Number(spell.areaRadius) || 0));
+  }
+  return range;
 }
 
 export type SummonControlCastFail =
@@ -94,16 +117,105 @@ export function resolveSummonControlSpell<T extends SummonKitCatalogSpell>(
   return fallbackSpells.find((sp) => sp.id === spellId);
 }
 
+type SummonClickUnit = {
+  id: string;
+  x: number;
+  y: number;
+  hp?: number;
+  side?: string;
+  isSummon?: boolean;
+};
+
+/**
+ * Occupant the kit click should pass to resolveSpellCast.
+ *
+ * Enemy / area / line / chain still require a living hostile — that is
+ * the historic canvas router. Self / ally use the live gate so a Wisp
+ * Blood Mend (or Sentinel Shield on self) is not silently dropped
+ * because the caster tile is not `isActiveHostile`.
+ */
+export function resolveSummonControlClickTarget<T extends SummonClickUnit>(
+  spell: Pick<SummonKitCatalogSpell, "targetType">,
+  caster: T,
+  tile: { x: number; y: number },
+  occupant: T | undefined,
+  live: TileCastableResult,
+): T | null {
+  if (!shouldExecuteLiveCast(live)) return null;
+  const t = (spell.targetType ?? "enemy") as string;
+  if (t === "self") {
+    return isCasterTile(caster, tile) ? caster : null;
+  }
+  if (t === "ally") {
+    if (isCasterTile(caster, tile)) return caster;
+    if (
+      occupant &&
+      occupant.isSummon === true &&
+      occupant.side === "player" &&
+      (occupant.hp ?? 0) > 0
+    ) {
+      return occupant;
+    }
+    return null;
+  }
+  if (
+    occupant &&
+    isActiveHostile({
+      hp: occupant.hp ?? 0,
+      isSummon: occupant.isSummon,
+      side:
+        occupant.side === "player" || occupant.side === "enemy"
+          ? occupant.side
+          : undefined,
+    })
+  ) {
+    return occupant;
+  }
+  return null;
+}
+
+export function pickSummonControlClickTarget<T extends SummonClickUnit>(args: {
+  spell: Pick<SummonKitCatalogSpell, "targetType"> & Partial<SpellConfig>;
+  caster: T;
+  tile: { x: number; y: number };
+  combatants: T[];
+  tiles: TileType[][];
+  effectiveRange?: number;
+  barrierTiles?: Map<string, number>;
+}): T | null {
+  const occupant = args.combatants.find(
+    (e) => e.x === args.tile.x && e.y === args.tile.y,
+  );
+  const live = isTileCastableLive(
+    args.spell as SpellConfig,
+    args.caster,
+    args.tile,
+    args.combatants as unknown as Enemy[],
+    args.tiles,
+    args.effectiveRange,
+    args.barrierTiles ?? new Map(),
+  );
+  return resolveSummonControlClickTarget(
+    args.spell,
+    args.caster,
+    args.tile,
+    occupant,
+    live,
+  );
+}
+
 export function chebyshevDistance(
   a: { x: number; y: number },
   b: { x: number; y: number },
 ): number {
-  const dx = Math.abs(Number(b.x) - Number(a.x));
-  const dy = Math.abs(Number(b.y) - Number(a.y));
-  if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+  const ax = Number(a.x);
+  const ay = Number(a.y);
+  const bx = Number(b.x);
+  const by = Number(b.y);
+  if (![ax, ay, bx, by].every(Number.isFinite)) {
     return Number.POSITIVE_INFINITY;
   }
-  return Math.max(dx, dy);
+  return chebyshevOnBoard({ x: ax, y: ay }, { x: bx, y: by });
 }
 
 export function planSummonControlCast<T extends SummonKitCatalogSpell>(args: {
@@ -141,7 +253,9 @@ export function planSummonControlCast<T extends SummonKitCatalogSpell>(args: {
     ),
   );
   const dist = chebyshevDistance(args.caster, args.target);
-  if (dist > range) return { ok: false, reason: "out_of_range" };
+  if (dist > summonControlRangeCap(spell, range)) {
+    return { ok: false, reason: "out_of_range" };
+  }
 
   if (args.liveGate) {
     const live = isTileCastableLive(
@@ -181,6 +295,28 @@ export function summonControlCastFailMessage(
     default:
       return "Unknown spell";
   }
+}
+
+/**
+ * Canvas mouse/touch routing into summon-control walks and kit casts.
+ *
+ * handleBossRushRoomClear used to leave the wolf on the map AND keep
+ * activeControlledSummonId set. After recap dismiss, every click then
+ * walked the summon (and returned) so the player could not step the
+ * progression portal. Regular victory already despawned, so `if (summon)`
+ * failed and clicks fell through. Gate on inBattle so leftover control
+ * cannot capture overworld input even if despawn is skipped.
+ */
+export function shouldRouteCanvasToSummonControl(opts: {
+  inBattle: boolean;
+  controlledSummonId: string | null | undefined;
+  summonStillLive: boolean;
+}): boolean {
+  return (
+    opts.inBattle === true &&
+    Boolean(opts.controlledSummonId) &&
+    opts.summonStillLive === true
+  );
 }
 
 /**

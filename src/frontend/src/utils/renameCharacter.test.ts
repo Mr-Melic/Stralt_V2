@@ -7,6 +7,7 @@ import {
 } from "./progressPersist.ts";
 import {
   RENAME_DOKA_COST,
+  beginRename,
   committedDokaAfterRename,
   liveDokaAfterRename,
   readRenameCharacterResult,
@@ -20,6 +21,32 @@ describe("shouldStartRename", () => {
     assert.equal(shouldStartRename(false, 200), true);
     assert.equal(shouldStartRename(true, 200), false);
     assert.equal(shouldStartRename(false, 99), false);
+  });
+
+  it("marks the ref so a same-tick double-click cannot enqueue twice", () => {
+    const inFlight = { current: false };
+    assert.equal(beginRename(inFlight, 200), true);
+    assert.equal(inFlight.current, true);
+    assert.equal(
+      beginRename(inFlight, 200),
+      false,
+      "React isRenaming is still false on the second click",
+    );
+    assert.equal(beginRename({ current: false }, 99), false);
+  });
+});
+
+describe("beginRename", () => {
+  it("blocks a same-tick double-click before React isRenaming commits", () => {
+    const inFlight = { current: false };
+    assert.equal(beginRename(inFlight, 200), true);
+    assert.equal(inFlight.current, true);
+    assert.equal(
+      beginRename(inFlight, 200),
+      false,
+      "second Confirm must not enqueue another 100 Doka rename",
+    );
+    assert.equal(beginRename({ current: false }, 99), false);
   });
 });
 

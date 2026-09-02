@@ -4,6 +4,8 @@
  * Candid and the purchase record is never created.
  */
 
+import { legacyPurchaseCreditForHud } from "./legacyPurchaseCredit.ts";
+
 export type ShopCustomerFields = {
   firstName?: string;
   lastName?: string;
@@ -122,6 +124,30 @@ export function shouldCommitShopCredit(gained: number): boolean {
   return gained > 0;
 }
 
+/** processPendingPurchases returns the credited Nat. A 0 means no-op. */
+export function readProcessPendingPurchasesMinted(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
+/**
+ * World remount still calls processPendingPurchases, which is now a no-op
+ * (GameKey redeem is the paid-credit writer). Two getCallerDokaBalance
+ * queries can disagree on IC; treating that jitter as a shop gain restored
+ * a pre-heal wallet on the persist lock and the next saveBattleStats
+ * refunded the spend.
+ */
+export function shouldCommitLegacyPurchaseCredit(
+  minted: number,
+  gained: number,
+): boolean {
+  return (
+    readProcessPendingPurchasesMinted(minted) > 0 &&
+    shouldCommitShopCredit(gained)
+  );
+}
+
 export function committedDokaAfterShopCreditOnLock(
   committedDoka: number,
   credited: number,
@@ -140,11 +166,9 @@ export async function creditPendingPurchases(
     return { previous: null, credited: null };
   }
   const previous = readCallerDokaBalance(await actor.getCallerDokaBalance());
-  await actor.processPendingPurchases();
-  return {
-    previous,
-    credited: readCallerDokaBalance(await actor.getCallerDokaBalance()),
-  };
+  const minted = await actor.processPendingPurchases();
+  const credited = readCallerDokaBalance(await actor.getCallerDokaBalance());
+  return legacyPurchaseCreditForHud(minted, { previous, credited });
 }
 
 /**
@@ -156,6 +180,12 @@ export type ShopCreditPersistLock = {
   enqueue<T>(fn: () => Promise<T>): Promise<T>;
   commit(next: { doka?: number }): void;
   snapshot(): { doka: number };
+  isWalletSeeded(): boolean;
+  /**
+   * `#ok` on an unseeded placeholder must not seed at grant-only, but idle
+   * hydrate must not copy the pre-credit query either.
+   */
+  noteUnseededCredit?: () => void;
 };
 
 export async function creditPendingPurchasesThroughPersist(
@@ -163,9 +193,23 @@ export async function creditPendingPurchasesThroughPersist(
   persist: ShopCreditPersistLock,
 ): Promise<{ previous: number | null; credited: number | null }> {
   return persist.enqueue(async () => {
-    const result = await creditPendingPurchases(actor);
+    let minted = 0;
+    const actorWithMinted: PurchaseCreditActor = {
+      getCallerDokaBalance: actor.getCallerDokaBalance,
+      processPendingPurchases: actor.processPendingPurchases
+        ? async () => {
+            const raw = await actor.processPendingPurchases?.();
+            minted = readProcessPendingPurchasesMinted(raw);
+            return raw;
+          }
+        : undefined,
+    };
+    const result = await creditPendingPurchases(actorWithMinted);
     const gained = creditedDokaDelta(result.previous, result.credited);
-    if (result.credited != null && shouldCommitShopCredit(gained)) {
+    if (
+      result.credited != null &&
+      shouldCommitLegacyPurchaseCredit(minted, gained)
+    ) {
       persist.commit({
         doka: committedDokaAfterShopCreditOnLock(
           persist.snapshot().doka,
@@ -174,5 +218,114 @@ export async function creditPendingPurchasesThroughPersist(
       });
     }
     return result;
+  });
+}
+
+export type GameKeyRedeemActor = {
+  redeemGameKey?: (code: string) => Promise<unknown>;
+};
+
+export function readRedeemGameKeyResult(
+  result: unknown,
+): { ok: number } | { err: string } {
+  if (result == null || typeof result !== "object") {
+    return { err: "redeemGameKey returned an empty result" };
+  }
+  const r = result as Record<string, unknown>;
+  if (
+    r.__kind__ === "err" ||
+    (r.err != null && r.ok == null && r._ok == null)
+  ) {
+    return { err: String(r.err ?? r._err ?? "redeemGameKey failed") };
+  }
+  const ok = r.ok ?? r._ok;
+  const n = Number(ok);
+  if (!Number.isFinite(n) || n < 0) {
+    return { err: "redeemGameKey missing Doka amount" };
+  }
+  return { ok: n };
+}
+
+/**
+ * redeemGameKey returns the granted delta (`#ok(dokaAmount)`), not the new
+ * wallet. Committing a follow-up getCallerDokaBalance used to skip the credit
+ * when that query was stale or threw after the key was already consumed.
+ *
+ * Chronology (stale query + recap heal):
+ * 1. Player redeems. Canister adds 1000; `#ok(1000)`.
+ * 2. getCallerDokaBalance still returns the pre-redeem wallet (replica lag)
+ *    or throws. creditedDokaDelta is 0, so the persist lock never commits.
+ * 3. Shop toasts "still pending" and does not credit the live UI.
+ * 4. Retry → "GameKey already used".
+ * 5. Recap heal saveBattleStats writes the pre-redeem snapshot and wipes
+ *    the paid Doka. Incoming-above-stored is ignored, so the mint is gone.
+ *
+ * Match claimAchievementReward: add `#ok` onto a seeded lock. Leave an
+ * unseeded placeholder alone so resolveCommittedDokaForAbsoluteWrite fetches.
+ */
+export function committedDokaAfterGameKeyRedeem(
+  committedDoka: number,
+  granted: number,
+): number {
+  const base = Math.max(0, Math.floor(Number(committedDoka) || 0));
+  const add = Math.max(0, Math.floor(Number(granted) || 0));
+  return base + add;
+}
+
+export function shouldCommitGameKeyRedeem(
+  walletSeeded: boolean,
+  granted: number,
+): boolean {
+  return walletSeeded && Math.max(0, Math.floor(Number(granted) || 0)) > 0;
+}
+
+/** HUD / live-ref credit. Prefer `#ok`, never a stale wallet-query delta. */
+export function dokaGainedFromGameKeyRedeem(
+  result: { ok: number } | { err: string },
+): number {
+  if (!("ok" in result)) return 0;
+  return Math.max(0, Math.floor(Number(result.ok) || 0));
+}
+
+/**
+ * redeemGameKey is a credit. Enqueue on the persist lock and commit the
+ * granted delta from `#ok` — do not require a second wallet query.
+ */
+export async function redeemGameKeyThroughPersist(
+  actor: GameKeyRedeemActor,
+  persist: ShopCreditPersistLock,
+  code: string,
+): Promise<{
+  previous: number | null;
+  credited: number | null;
+  result: { ok: number } | { err: string };
+}> {
+  return persist.enqueue(async () => {
+    if (!actor.redeemGameKey) {
+      return {
+        previous: null,
+        credited: null,
+        result: { err: "Actor not available" },
+      };
+    }
+    const before = persist.snapshot().doka;
+    const parsed = readRedeemGameKeyResult(await actor.redeemGameKey(code));
+    const gained = dokaGainedFromGameKeyRedeem(parsed);
+    if (shouldCommitGameKeyRedeem(persist.isWalletSeeded(), gained)) {
+      persist.commit({
+        doka: committedDokaAfterGameKeyRedeem(persist.snapshot().doka, gained),
+      });
+    } else if (gained > 0) {
+      // Canister already added. Leave the placeholder unseeded so an
+      // absolute write fetches, but block idle hydrate from copying the
+      // in-flight pre-redeem query (that used to seed and wipe the grant).
+      persist.noteUnseededCredit?.();
+    }
+    const after = persist.snapshot().doka;
+    return {
+      previous: persist.isWalletSeeded() ? before : null,
+      credited: persist.isWalletSeeded() && gained > 0 ? after : null,
+      result: parsed,
+    };
   });
 }

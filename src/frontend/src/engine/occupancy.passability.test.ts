@@ -51,6 +51,19 @@ describe("isCellFree", () => {
     assert.equal(isCellFree({ x: 7, y: 7 }, occupancy), false);
     assert.equal(isCellFree({ x: 8, y: 8 }, occupancy), false);
   });
+
+  it("allows cells past 16 when the occupancy grid is wider", () => {
+    const tiles = [Array.from({ length: 20 }, () => true)];
+    const occupancy: OccupancyContext = {
+      tiles,
+      barriers: new Set(),
+      voidTiles: new Set(),
+      portals: new Set(),
+      isOccupied: () => false,
+    };
+    assert.equal(isCellFree({ x: 18, y: 0 }, occupancy), true);
+    assert.equal(isCellFree({ x: 20, y: 0 }, occupancy), false);
+  });
 });
 
 describe("findNearestFreeCell", () => {
@@ -117,65 +130,6 @@ describe("applyAttract / applyPushback", () => {
     });
     assert.deepEqual(applyPushback({ x: 4, y: 4 }, { x: 4, y: 4 }, 3, ctx()), {
       x: 4,
-      y: 4,
-    });
-  });
-});
-
-describe("isCellFree", () => {
-  it("rejects out-of-bounds, walls, barriers, portals, voids, and occupants", () => {
-    const tiles = openGrid();
-    tiles[4][4] = false;
-    const blocked = ctx({
-      tiles,
-      barriers: new Set([occKey(5, 5)]),
-      portals: new Set([occKey(6, 6)]),
-      voidTiles: new Set([occKey(7, 7)]),
-      isOccupied: (cell) => cell.x === 8 && cell.y === 8,
-    });
-    assert.equal(isCellFree({ x: 3, y: 3 }, blocked), true);
-    assert.equal(isCellFree({ x: -1, y: 3 }, blocked), false);
-    assert.equal(isCellFree({ x: WORLD_GRID_SIZE, y: 3 }, blocked), false);
-    assert.equal(isCellFree({ x: 4, y: 4 }, blocked), false);
-    assert.equal(isCellFree({ x: 5, y: 5 }, blocked), false);
-    assert.equal(isCellFree({ x: 6, y: 6 }, blocked), false);
-    assert.equal(isCellFree({ x: 7, y: 7 }, blocked), false);
-    assert.equal(isCellFree({ x: 8, y: 8 }, blocked), false);
-  });
-});
-
-describe("findNearestFreeCell", () => {
-  it("visits the left neighbor first, then the +y cell, on ring 1", () => {
-    const origin = { x: 8, y: 8 };
-    const occupied = new Set([occKey(8, 8), occKey(7, 8)]);
-    const found = findNearestFreeCell(
-      origin,
-      ctx({
-        isOccupied: (cell) => occupied.has(occKey(cell.x, cell.y)),
-      }),
-      2,
-    );
-    assert.deepEqual(found, { x: 8, y: 9 });
-  });
-});
-
-describe("applyPushback / applyAttract", () => {
-  it("stops pushback before a blocked tile and attract one tile short of the magnet", () => {
-    const wall = ctx({
-      barriers: new Set([occKey(10, 5)]),
-    });
-    assert.deepEqual(applyPushback({ x: 8, y: 5 }, { x: 6, y: 5 }, 4, wall), {
-      x: 9,
-      y: 5,
-    });
-
-    const open = ctx();
-    assert.deepEqual(applyAttract({ x: 4, y: 4 }, { x: 8, y: 4 }, 6, open), {
-      x: 7,
-      y: 4,
-    });
-    assert.deepEqual(applyAttract({ x: 7, y: 4 }, { x: 8, y: 4 }, 3, open), {
-      x: 7,
       y: 4,
     });
   });

@@ -4,6 +4,7 @@ import type { Enemy } from "../types/gameTypes.ts";
 import {
   isChallengeCompleted,
   recordChallengeDamageTaken,
+  recordChallengeHealFromHpRestore,
 } from "../utils/challengeCompletion.ts";
 import {
   type ApplyDamageToEnemyDeps,
@@ -309,5 +310,97 @@ describe("applyDamageToEnemy store HP commit", () => {
       }),
     });
     assert.equal(committedId, null);
+  });
+});
+
+describe("applyDamageToEnemy drain → challenge healUsed", () => {
+  const NO_HEAL = {
+    id: "easy_1",
+    tier: "easy" as const,
+    description: "Win without using healing spells",
+    condition: "no_healing" as const,
+    rewards: { doka: 50 },
+  };
+  const HARD_NO_HEAL = {
+    id: "hard_1",
+    tier: "hard" as const,
+    description: "Win without healing and take under 30 damage",
+    condition: "no_healing_under_30_damage" as const,
+    rewards: { doka: 200, xp: 500 },
+  };
+
+  it("records an in-battle Life Drain HP restore so no-heal cannot persist", () => {
+    const target = enemy();
+    let restored = 0;
+    applyDamageToEnemy({
+      hitTarget: target,
+      isFirstTarget: true,
+      deps: stubDeps({
+        spell: { id: "starter-drain", name: "Life Drain" },
+        isDrainSpell: true,
+        preCritDmgBM: 20,
+        maxHp: 50,
+        characterStats: { hp: 20 },
+        targetsToHit: [target],
+        enemyHpMap: { e1: 40 },
+        onPlayerHealed: (amount) => {
+          restored = amount;
+        },
+      }),
+    });
+    assert.equal(restored, 10);
+    const healUsed = recordChallengeHealFromHpRestore(true, false, restored);
+    assert.equal(
+      isChallengeCompleted(NO_HEAL, {
+        turnCount: 1,
+        totalDamage: 0,
+        healUsed,
+        directHit: true,
+        maxApUsedInTurn: 4,
+      }),
+      false,
+    );
+    assert.equal(
+      isChallengeCompleted(HARD_NO_HEAL, {
+        turnCount: 1,
+        totalDamage: 0,
+        healUsed,
+        directHit: true,
+        maxApUsedInTurn: 4,
+      }),
+      false,
+    );
+  });
+
+  it("does not record drain at full HP so a damage-only Life Drain can still complete no-heal", () => {
+    const target = enemy();
+    let restored = 0;
+    applyDamageToEnemy({
+      hitTarget: target,
+      isFirstTarget: true,
+      deps: stubDeps({
+        spell: { id: "starter-drain", name: "Life Drain" },
+        isDrainSpell: true,
+        preCritDmgBM: 20,
+        maxHp: 50,
+        characterStats: { hp: 50 },
+        targetsToHit: [target],
+        enemyHpMap: { e1: 40 },
+        onPlayerHealed: (amount) => {
+          restored = amount;
+        },
+      }),
+    });
+    assert.equal(restored, 0);
+    assert.equal(
+      isChallengeCompleted(NO_HEAL, {
+        turnCount: 1,
+        totalDamage: 0,
+        healUsed: recordChallengeHealFromHpRestore(true, false, restored),
+        directHit: true,
+        maxApUsedInTurn: 4,
+      }),
+      true,
+    );
   });
 });

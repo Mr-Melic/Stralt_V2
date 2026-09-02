@@ -4,6 +4,7 @@ import {
   recapXpAfterGrant,
   xpForNextLevel,
   xpHudProgress,
+  xpThresholdBigInt,
 } from "./xpCurve.ts";
 
 assert.equal(xpForNextLevel(1), 100);
@@ -57,5 +58,24 @@ assert.deepEqual(recapXpAfterGrant(90, 1, 20), {
 });
 assert.equal(xpForNextLevel(3), 400);
 assert.notEqual(3 * 100, xpForNextLevel(3));
+
+// Level 48: 100 * 2^47 exceeds MAX_SAFE_INTEGER. The HUD saturates so
+// bars stay finite. Persist must consume the bigint threshold — using
+// the saturated HUD number as the consume amount false-levels.
+assert.equal(xpForNextLevel(47), 7_036_874_417_766_400);
+assert.ok(xpThresholdBigInt(48) > BigInt(Number.MAX_SAFE_INTEGER));
+assert.equal(xpForNextLevel(48), Number.MAX_SAFE_INTEGER);
+assert.equal(Number.isFinite(xpForNextLevel(1019)), true);
+assert.equal(xpForNextLevel(1019), Number.MAX_SAFE_INTEGER);
+assert.deepEqual(
+  applyXpDelta(Number.MAX_SAFE_INTEGER, 48, 0),
+  { newXp: Number.MAX_SAFE_INTEGER, newLevel: 48 },
+  "saturated leftover must not consume the HUD ceiling and grant a free level",
+);
+assert.deepEqual(
+  applyXpDelta(0, 47, 7_036_874_417_766_400),
+  { newXp: 0, newLevel: 48 },
+  "exact safe-integer threshold at 47 still levels",
+);
 
 console.log("xpCurve.test: ok");

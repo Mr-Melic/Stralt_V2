@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import {
   JACKPOT_HEAL_DOKA_COST,
   applyHealHpToLiveStats,
+  creditLiveDoka,
   dokaHealAmounts,
+  isBuffShopHealItem,
   isBuffShopOpen,
   liveDokaForShopSpend,
   liveShopWallet,
@@ -13,8 +15,12 @@ import {
   resolveOverworldHealSpend,
   shouldAllowShopSpend,
   shouldRollbackFailedHeal,
+  shouldRollbackFailedShopSpend,
   shouldStartDokaHeal,
+  syncLiveDokaFromProp,
+  tryConsumeBuffItem,
   tryPurchaseBuffItem,
+  writeLiveDoka,
 } from "./itemShop.ts";
 
 assert.equal(
@@ -24,6 +30,13 @@ assert.equal(
 );
 assert.equal(isBuffShopOpen(false), false);
 assert.equal(isBuffShopOpen(true), true);
+assert.equal(isBuffShopHealItem("health_potion"), true);
+assert.equal(isBuffShopHealItem("greater_health_potion"), true);
+assert.equal(
+  isBuffShopHealItem("battle_elixir"),
+  false,
+  "AP items must not flip no_healing",
+);
 
 assert.equal(
   liveShopWallet(50, () => 47),
@@ -160,6 +173,18 @@ assert.equal(
   }),
   null,
 );
+
+{
+  const afterFirst = tryConsumeBuffItem(1);
+  assert.equal(afterFirst, 0);
+  assert.equal(
+    tryConsumeBuffItem(afterFirst ?? 0),
+    null,
+    "double-click must not consume the same stack twice",
+  );
+  assert.equal(tryConsumeBuffItem(0), null);
+  assert.equal(tryConsumeBuffItem(-1), null);
+}
 
 {
   const first = resolveOverworldHealSpend({
@@ -321,6 +346,50 @@ assert.equal(
     purchase,
     null,
     "heal-then-buy must read the host ref, not the stale-high shop fallback",
+  );
+}
+
+{
+  // Chronology: victory then() used to call onDokaBalanceChange(100+50)
+  // without writing the ref. Heal spent from 100, then GameFlow committed
+  // 150 and syncLiveDokaFromProp copied 150 over 90 — a ghost 10 Doka heal.
+  const live = { current: 100 };
+  writeLiveDoka(live, 90);
+  assert.equal(creditLiveDoka(live, 50), 140);
+  assert.equal(live.current, 140);
+  assert.equal(
+    creditLiveDoka({ current: 90 }, 50),
+    140,
+    "a credit after a same-tick heal must add onto 90, not the pre-heal 100",
+  );
+  // Double-buy: first persist rejects after the second already committed 0.
+  // Adding +50 onto 0 minted a ghost wallet for the next heal.
+  assert.equal(
+    shouldRollbackFailedShopSpend({ liveDoka: 0, expectedDoka: 50 }),
+    false,
+    "a later successful buy must keep the committed 0",
+  );
+  assert.equal(
+    shouldRollbackFailedShopSpend({ liveDoka: 50, expectedDoka: 50 }),
+    true,
+    "same-click reject still refunds when nothing superseded it",
+  );
+}
+
+{
+  // Credit scheduled setDokaBalance(150); heal spent live to 140; GameFlow
+  // then flushed 150. Copying the new prop over a local mutation minted a
+  // ghost 10 Doka for the next heal persist.
+  const afterHeal = syncLiveDokaFromProp({
+    propDoka: 150,
+    prevPropDoka: 100,
+    liveDoka: 140,
+  });
+  assert.deepEqual(afterHeal, { liveDoka: 140, prevPropDoka: 150 });
+  assert.deepEqual(
+    syncLiveDokaFromProp({ propDoka: 150, prevPropDoka: 100, liveDoka: 100 }),
+    { liveDoka: 150, prevPropDoka: 150 },
+    "unmutated live still adopts the new authoritative prop",
   );
 }
 

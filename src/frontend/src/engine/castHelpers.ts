@@ -31,6 +31,11 @@ import {
   processCombatantDeath,
 } from "./deathPipeline.ts";
 import type { PlayerCastEnemy, PlayerCastTarget } from "./spellEngine";
+import {
+  hitsAlliesIncludesPlayer,
+  hitsMultipleIncludesOccupant,
+  playerSpellEffectiveRange,
+} from "./targeting.ts";
 import { removeCombatantFromTurnQueue } from "./turnQueue.ts";
 
 /**
@@ -93,9 +98,9 @@ export function getAoETargets(args: GetAoETargetsArgs): HitTarget[] {
   } = args;
 
   // FEATURE 4: Multi-target + AoE — build list of targets
-  const effectiveRange = getEffectiveSpellRange(
-    Math.max(1, Number(spell.maxRange ?? spell.range)),
-    spell.modifiableRange ? spell.id : undefined,
+  const effectiveRange = playerSpellEffectiveRange(
+    spell,
+    getEffectiveSpellRange,
   );
   // AoE hit tiles: collect enemies at each tile in the hitTiles pattern around the clicked target.
   // Liveness filter (#DEATH-DEREGISTER): exclude already-dead enemies (hp <= 0) at
@@ -126,26 +131,24 @@ export function getAoETargets(args: GetAoETargetsArgs): HitTarget[] {
   // assembly time. This prevents post-mortem hits when a multi-hit/AoE spell
   // is cast after a prior hit in the same loop already killed a target.
   const baseEnemyTargets = spell.hitsMultiple
-    ? enemies.filter((e) => {
-        const dx = Math.abs(e.x - gridPos.x);
-        const dy = Math.abs(e.y - gridPos.y);
-        return Math.max(dx, dy) <= effectiveRange && isActiveHostile(e);
-      })
+    ? enemies.filter(
+        (e) =>
+          hitsMultipleIncludesOccupant(e, gridPos, effectiveRange) &&
+          isActiveHostile(e),
+      )
     : targetEnemy && isActiveHostile(targetEnemy)
       ? [targetEnemy, ...aoeEnemies]
       : [];
   const enemiesInRange = Array.from(
     new Map(baseEnemyTargets.map((e) => [e.id, e])).values(),
   );
-  // hitsAllies: if the spell also hits allies (player's own position is in range), include a sentinel
-  const playerInAoeRange =
-    spell.hitsAllies === true &&
-    spell.hitsMultiple === true &&
-    (() => {
-      const dx = Math.abs(playerPosition.x - playerPosition.x);
-      const dy = Math.abs(playerPosition.y - playerPosition.y);
-      return Math.max(dx, dy) <= effectiveRange; // player is always at range 0 from self
-    })();
+  // hitsAllies: Chebyshev from the clicked tile (not player-to-self).
+  const playerInAoeRange = hitsAlliesIncludesPlayer(
+    spell,
+    playerPosition,
+    gridPos,
+    effectiveRange,
+  );
   const targetsToHit: HitTarget[] = [
     ...enemiesInRange,
     ...(playerInAoeRange
@@ -241,6 +244,12 @@ export interface ApplyDamageToEnemyDeps {
    */
   onPlayerReflectedDamage: (amount: number) => void;
   /**
+   * Drain restores player HP without executeCastAttempt's self+heal gate.
+   * Callers must flip challenge healUsed here so easy_1 / hard_1 cannot
+   * persist after a Life Drain that actually increased HP.
+   */
+  onPlayerHealed?: (amount: number) => void;
+  /**
    * Victory, DoT ticks, and later enemyTakesDamage read combatantsRef.
    * React-only enemyHpMap / turnOrder writes leave store hp unchanged, so
    * the next store-based tick recomputes from full HP and wipes this hit.
@@ -301,6 +310,7 @@ export function applyDamageToEnemy(args: ApplyDamageToEnemyArgs): void {
     setCharacterStats,
     processCombatantDeath,
     onPlayerReflectedDamage,
+    onPlayerHealed,
     commitEnemyHp,
   } = deps;
 
@@ -473,6 +483,7 @@ export function applyDamageToEnemy(args: ApplyDamageToEnemyArgs): void {
         hp: Math.min(maxHp, prev.hp + healAmt),
       }));
       logBattleEntry(`${spell.name} drained ${healAmt} HP!`, "#22c55e");
+      onPlayerHealed?.(healAmt);
     }
   }
 }

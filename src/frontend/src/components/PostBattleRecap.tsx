@@ -57,10 +57,6 @@ const PostBattleRecap: React.FC<PostBattleRecapProps> = ({
 
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Focus trap on mount
-  useEffect(() => {
-    console.log("BattleSummary RENDERED");
-  }, []);
   useEffect(() => {
     panelRef.current?.focus();
   }, []);
@@ -69,7 +65,6 @@ const PostBattleRecap: React.FC<PostBattleRecapProps> = ({
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        console.log("BattleSummary DISMISSED", "escape-key");
         onClose();
       }
     };
@@ -78,10 +73,18 @@ const PostBattleRecap: React.FC<PostBattleRecapProps> = ({
   }, [onClose]);
 
   return (
-    <div
+    <dialog
+      open
       data-ocid="post_battle_recap.dialog"
+      aria-label={data.isDefeat ? "Defeat recap" : "Battle complete"}
       className="fixed inset-0 flex items-center justify-center"
       style={{
+        width: "100%",
+        height: "100%",
+        maxWidth: "none",
+        maxHeight: "none",
+        margin: 0,
+        border: "none",
         zIndex: 9600,
         background: "rgba(0,0,0,0.75)",
         backdropFilter: "blur(3px)",
@@ -89,15 +92,23 @@ const PostBattleRecap: React.FC<PostBattleRecapProps> = ({
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) {
-          console.log("BattleSummary DISMISSED", "backdrop-click");
           onClose();
         }
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          console.log("BattleSummary DISMISSED", "enter-or-space-key");
-          onClose();
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const target = e.target;
+        if (
+          target instanceof HTMLElement &&
+          (target.tagName === "BUTTON" ||
+            target.tagName === "A" ||
+            target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable)
+        ) {
+          return;
         }
+        onClose();
       }}
     >
       <div
@@ -194,7 +205,6 @@ const PostBattleRecap: React.FC<PostBattleRecapProps> = ({
             type="button"
             data-ocid="post_battle_recap.close_button"
             onClick={() => {
-              console.log("BattleSummary DISMISSED", "user-clicked-close");
               onClose();
             }}
             aria-label="Close recap"
@@ -596,7 +606,6 @@ const PostBattleRecap: React.FC<PostBattleRecapProps> = ({
             type="button"
             data-ocid="post_battle_recap.confirm_button"
             onClick={() => {
-              console.log("BattleSummary DISMISSED", "continue-button");
               onClose();
             }}
             style={{
@@ -614,6 +623,7 @@ const PostBattleRecap: React.FC<PostBattleRecapProps> = ({
               textTransform: "uppercase",
               cursor: "pointer",
               transition: "all 0.2s",
+              minHeight: 44,
               boxShadow: "0 0 12px oklch(var(--dofus-border-gold) / 0.2)",
             }}
             onMouseEnter={(e) => {
@@ -635,7 +645,7 @@ const PostBattleRecap: React.FC<PostBattleRecapProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 };
 

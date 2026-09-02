@@ -40,6 +40,20 @@ export function shouldStartRename(
   return !isRenaming && liveDoka >= RENAME_DOKA_COST;
 }
 
+/**
+ * Confirm Rename used `isRenaming` React state. Both clicks of a double-click
+ * see `false` before the re-render, enqueue two renameCharacter calls, and
+ * debit 100 Doka twice. Mark the ref in the same tick as the first click.
+ */
+export function beginRename(
+  inFlight: { current: boolean },
+  liveDoka: number,
+): boolean {
+  if (!shouldStartRename(inFlight.current, liveDoka)) return false;
+  inFlight.current = true;
+  return true;
+}
+
 /** Only debit the live wallet after the canister accepted the rename. */
 export function shouldDebitRenameDoka(
   parsed: { ok: true } | { err: string },

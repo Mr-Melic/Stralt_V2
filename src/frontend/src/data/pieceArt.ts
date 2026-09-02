@@ -645,6 +645,18 @@ export function getCreaturePattern(
   return chessPiecePatterns.king.front;
 }
 
+/**
+ * Persist-safe piece lookup. Character.pieceType is a string id; a rename or
+ * a pre-validation row must not throw in portrait/RAF. Same king.front
+ * fallback as getCreaturePattern. Never treat sprite URLs as required.
+ */
+export function getPersistedPiecePattern(
+  pieceType: string,
+  direction?: ViewDirection,
+): number[][] {
+  return getCreaturePattern(pieceType as CreatureKey, direction);
+}
+
 // ── Unified combatant draw dispatch ───────────────────────────────────────────
 
 /**

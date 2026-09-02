@@ -116,6 +116,22 @@ export function shouldAwardVictory(opts: {
 }
 
 /**
+ * handleBattleEnd / handleBossRushRoomClear set battleEndedRef then call
+ * cleanupBattle. Resetting the guard there let a second victory-gate fire
+ * (enemies update / Strict Mode) re-enter applyRewards for the same fight.
+ * The guard stays true through cleanup and is cleared only at the next
+ * battle start.
+ */
+export function persistBattleEndGuardAfterCleanup(ended: boolean): boolean {
+  return ended === true;
+}
+
+/** Next fight may persist rewards. Call at battle start, not in cleanup. */
+export function resetBattleEndGuardForNewBattle(): boolean {
+  return false;
+}
+
+/**
  * World / next-room encounters may start only when React `inBattle` AND the
  * sync `inBattleRef` are both false. `cleanupBattle()` only clears the ref;
  * `handleBattleEnd` / `handleBossRushRoomClear` / death must also
@@ -134,22 +150,40 @@ export function shouldAllowBattleTrigger(opts: {
    * can fire if the player also dies in it).
    */
   deathRealmPending?: boolean;
+  /**
+   * Recap can be dismissed while applyRewards is still queued. A walk onto
+   * another overworld hostile then starts a second fight before the first
+   * credit commits.
+   */
+  victoryPersistPending?: boolean;
 }): boolean {
   return (
     !opts.inBattle &&
     !opts.inBattleRef &&
     !opts.transitionInProgress &&
-    !opts.deathRealmPending
+    !opts.deathRealmPending &&
+    !opts.victoryPersistPending
   );
 }
 
 /**
  * Returns `enemies` with all summons removed (living or dead). Used on
- * victory to despawn player-side summons cleanly so the post-battle state
- * contains only the original non-summon combatants.
+ * victory and Boss Rush room-clear so leftover player summons cannot occupy
+ * the walk to the progression portal or become the next overworld collision.
  */
 export function despawnSummons<T extends Combatant>(enemies: T[]): T[] {
   return enemies.filter((e) => !e.isSummon);
+}
+
+/**
+ * Overworld encounter collision. checkBattleTrigger used to start a fight
+ * on any same-cell combatant, so a leftover player-side wolf after a Boss
+ * Rush room-clear (which skipped despawnSummons) re-entered battle as the
+ * colliding "enemy" — often with 0 hostiles, so victory + applyRewards
+ * fired immediately.
+ */
+export function shouldTriggerOverworldEncounter(e: Combatant): boolean {
+  return isActiveHostile(e);
 }
 
 /**
@@ -349,4 +383,24 @@ export function shouldAdvanceAfterEnemyTurn(opts: {
   hostilesRemaining: number;
 }): boolean {
   return !opts.deathTriggered && opts.hostilesRemaining > 0;
+}
+
+/**
+ * Clamp the AI destination and return a store patch when the unit actually
+ * leaves its origin tile. The WX apply layer used dest only for range /
+ * hazard math and never called updateCombatant({ x, y }), so regular
+ * enemies stayed frozen while boss / erratic paths already committed.
+ */
+export function enemyDestToCommit(
+  origin: { x: number; y: number },
+  dest: { x: number; y: number } | null | undefined,
+  gridSize: number,
+): { x: number; y: number } | null {
+  if (!dest) return null;
+  const size = Math.max(1, Math.floor(Number(gridSize) || 0));
+  const x = Math.max(0, Math.min(size - 1, Math.floor(Number(dest.x))));
+  const y = Math.max(0, Math.min(size - 1, Math.floor(Number(dest.y))));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  if (x === origin.x && y === origin.y) return null;
+  return { x, y };
 }

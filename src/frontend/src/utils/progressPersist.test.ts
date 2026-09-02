@@ -10,6 +10,7 @@ import {
   resolveCommittedDokaForAbsoluteWrite,
   resolveHydratedXp,
   shouldCopyIdleWalletDoka,
+  shouldPersistAbsoluteDokaSpend,
   spendFromUiBalance,
 } from "./progressPersist.ts";
 
@@ -43,6 +44,26 @@ describe("spend math", () => {
     assert.equal(clampAbsoluteProgressWrite(250, 200), 200);
     assert.equal(clampAbsoluteProgressWrite(0, 0), 0);
     assert.equal(clampAbsoluteProgressWrite(80, 100), 80);
+  });
+
+  it("skips a 0-spend saveBattleStats so a stale-prop double-click cannot persist free HP", () => {
+    // Click 1 empties the live wallet. Click 2 still sees the render
+    // snapshot, so spendFromUiBalance(0, 0) is 0. Writing that snapshot
+    // used to persist the extra heal / shop stack with no Doka debit.
+    let live = 10;
+    const firstNext = 0;
+    const firstSpend = spendFromUiBalance(live, firstNext);
+    live = firstNext;
+    assert.equal(firstSpend, 10);
+    assert.equal(shouldPersistAbsoluteDokaSpend(firstSpend), true);
+
+    const secondSpend = spendFromUiBalance(live, 0);
+    assert.equal(secondSpend, 0);
+    assert.equal(shouldPersistAbsoluteDokaSpend(secondSpend), false);
+    assert.equal(shouldPersistAbsoluteDokaSpend(0), false);
+    assert.equal(shouldPersistAbsoluteDokaSpend(-4), false);
+    assert.equal(shouldPersistAbsoluteDokaSpend(Number.NaN), false);
+    assert.equal(shouldPersistAbsoluteDokaSpend(1), true);
   });
 });
 
@@ -212,6 +233,40 @@ describe("progress persist lock", () => {
       }),
       false,
     );
+  });
+
+  it("does not let a stale pre-credit query seed after an unseeded #ok", () => {
+    // Chronology:
+    // 1. World mounts. Lock is placeholder 0, unseeded.
+    // 2. redeemGameKey / claimAchievementReward `#ok(1000)` while the
+    //    getCallerDokaBalance query is still in flight. Grant-only must
+    //    not seed (live wallet may already be 5000).
+    // 3. Query lands with the pre-credit 5000. walletReady hydrate used
+    //    to copy 5000 and mark the lock seeded.
+    // 4. Recap heal saveBattleStats wrote 5000 and wiped the paid 1000
+    //    (incoming-below-stored is applied; saveBattleStats never mints).
+    const lock = createProgressPersist({ doka: 0, xp: 80, level: 4 });
+    lock.noteUnseededCredit();
+    assert.equal(lock.isWalletSeeded(), false);
+    assert.equal(
+      shouldCopyIdleWalletDoka({
+        walletSeeded: false,
+        walletReady: true,
+        incomingDoka: 5000,
+        committedDoka: 0,
+        idleWalletSeedBlocked: true,
+      }),
+      false,
+    );
+    assert.equal(
+      lock.hydrateWhenIdle(
+        { doka: 5000, xp: 80, level: 4 },
+        { walletReady: true },
+      ),
+      true,
+    );
+    assert.equal(lock.isWalletSeeded(), false);
+    assert.equal(lock.snapshot().doka, 0);
   });
 
   it("does not let a placeholder 0 overwrite a shop-credit seed when ready is early", () => {
@@ -468,5 +523,30 @@ describe("progress persist lock", () => {
     assert.equal(missed, null);
     assert.equal(lock.isWalletSeeded(), false);
     assert.equal(lock.snapshot().doka, 0);
+  });
+
+  it("runs beforeEach ahead of heal/applyRewards but not death persist", async () => {
+    const order: string[] = [];
+    const lock = createProgressPersist(
+      { doka: 200, xp: 100, level: 4 },
+      {
+        beforeEach: async () => {
+          order.push("flush");
+        },
+      },
+    );
+    await lock.enqueue(async () => {
+      order.push("heal");
+    });
+    await lock.enqueue(
+      async () => {
+        order.push("death");
+      },
+      { skipBeforeEach: true },
+    );
+    await lock.enqueue(async () => {
+      order.push("victory");
+    });
+    assert.deepEqual(order, ["flush", "heal", "death", "flush", "victory"]);
   });
 });

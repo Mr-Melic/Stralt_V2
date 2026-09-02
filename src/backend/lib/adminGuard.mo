@@ -11,6 +11,12 @@ module {
     public let MAX_ID : Nat = 64;
     public let MAX_NAME : Nat = 100;
     public let MAX_DUNGEON_DEPTH : Nat = 16;
+    /// Matches frontend PLAYER_BASE_AP / PLAYER_BASE_MP. saveBattleStats
+    /// used to accept maxAp=20 at level 1.
+    public let PLAYER_BASE_AP : Nat = 8;
+    public let PLAYER_BASE_MP : Nat = 4;
+    public let MAX_PERSISTED_AP : Nat = 20;
+    public let MAX_PERSISTED_MP : Nat = 20;
 
     public func isBuiltInSpellId(id : Text) : Bool {
         id == "shadow_strike" or id == "soul_rend" or id == "vampire_bite"
@@ -56,10 +62,21 @@ module {
         out
     };
 
+    func isUrlPrefixWs(c : Char) : Bool {
+        let n = c.toNat32();
+        c <= ' '
+            or n == (0xA0 : Nat32)
+            or n == (0xFEFF : Nat32)
+            or (n >= (0x2000 : Nat32) and n <= (0x200B : Nat32))
+            or n == (0x2028 : Nat32)
+            or n == (0x2029 : Nat32)
+            or n == (0x202F : Nat32)
+            or n == (0x205F : Nat32)
+            or n == (0x3000 : Nat32)
+    };
+
     func trimLeadingWs(url : Text) : Text {
-        url.trimStart(#predicate(func(c : Char) : Bool {
-            c == ' ' or c == '\t' or c == '\n' or c == '\r'
-        }))
+        url.trimStart(#predicate(isUrlPrefixWs))
     };
 
     func schemePrefix(url : Text) : Text {
@@ -67,18 +84,39 @@ module {
     };
 
     /// Case-insensitive, leading-whitespace-tolerant scheme check.
-    /// `JavaScript:` and ` javascript:` must not reach player-facing hrefs.
+    /// `JavaScript:`, ` javascript:`, NBSP/BOM prefixes, and `file:` must not
+    /// reach player-facing hrefs.
     public func unsafeUrl(url : Text) : Bool {
         let lower = schemePrefix(url);
         lower.startsWith(#text "javascript:")
             or lower.startsWith(#text "data:")
             or lower.startsWith(#text "vbscript:")
+            or lower.startsWith(#text "file:")
     };
 
-    /// Shop proof blobs are data: URLs from the official client. Reject only
-    /// script schemes; do not treat data: as unsafe here.
+    /// Landing ads are hosted PNG/WebP. http and non-URL schemes are rejected.
+    public func requireHttpsUrl(lbl : Text, url : Text) : ?Text {
+        let lower = schemePrefix(url);
+        if (not lower.startsWith(#text "https:")) {
+            return ?(lbl # " must be an https URL");
+        };
+        null
+    };
+
+    /// Official shop proof is `data:<image|pdf|octet-stream>;base64,...`.
+    /// Empty / https / `data:text/html` let a raw client skip the file picker
+    /// or store an admin-viewable XSS payload (`window.open` of the proof).
+    public func proofDataMimeAllowed(url : Text) : Bool {
+        let mime = asciiLowerPrefix(trimLeadingWs(url), 40);
+        mime.startsWith(#text "data:image/jpeg")
+            or mime.startsWith(#text "data:image/jpg")
+            or mime.startsWith(#text "data:image/png")
+            or mime.startsWith(#text "data:application/pdf")
+            or mime.startsWith(#text "data:application/octet-stream")
+    };
+
     public func validateProofFileUrl(url : Text) : ?Text {
-        if (url == "") { return null };
+        if (url == "") { return ?"proofFileUrl is required" };
         if (url.size() > 524_288) {
             return ?"proofFileUrl exceeds maximum size";
         };
@@ -86,7 +124,20 @@ module {
         if (lower.startsWith(#text "javascript:") or lower.startsWith(#text "vbscript:")) {
             return ?"proofFileUrl uses a forbidden URL scheme";
         };
+        if (not proofDataMimeAllowed(url)) {
+            return ?"proofFileUrl must be a data: image, PDF, or octet-stream";
+        };
         null
+    };
+
+    /// Official checkout is one in-flight purchase. A second pending record
+    /// is the double-click / raw-client path that auto-completes twice.
+    public func rejectSecondPendingPurchase(alreadyPending : Bool) : ?Text {
+        if (alreadyPending) { ?"A purchase is already pending" } else { null }
+    };
+
+    public func chatCooldownActive(lastSent : Int, now : Int, minNs : Int) : Bool {
+        now - lastSent < minNs
     };
 
     public func validateOptionalUrl(lbl : Text, url : Text) : ?Text {
@@ -175,6 +226,14 @@ module {
             return ?"dokaSpawnBaseValue must be between 1 and 10000";
         };
         null
+    };
+
+    /// Fresh-install seed. dokaSpawnChance=0 is a legal live value (no ground
+    /// Doka). Using it as the sentinel rewrote a valid admin singleton to
+    /// defaultGameConfig on the next actor init. dokaSpawnBaseValue cannot be
+    /// 0 after validateGameConfig, so it is the uninitialized marker.
+    public func gameConfigNeedsSeed(config : Types.AdminGameConfig) : Bool {
+        config.dokaSpawnBaseValue == 0
     };
 
     /// Failure: tierSize=0 is the fresh-install seed sentinel and is used as a
@@ -287,18 +346,30 @@ module {
     };
 
     func knownSpellType(t : Text) : Bool {
-        t == "damage" or t == "heal" or t == "drain"
+        t == "damage" or t == "heal" or t == "drain" or t == "summon"
     };
 
     func knownEffectType(t : Text) : Bool {
         t == "damage" or t == "heal" or t == "drain" or t == "dot" or t == "aoe"
-            or t == "debuff" or t == "buff" or t == "attract_multi"
+            or t == "debuff" or t == "buff" or t == "attract_multi" or t == "summon"
     };
 
     func knownEffectCategory(t : Text) : Bool {
         t == "damage" or t == "heal" or t == "drain" or t == "defense"
             or t == "pushback" or t == "attract" or t == "teleport"
             or t == "aoe" or t == "dot" or t == "debuff" or t == "buff" or t == "cc"
+    };
+
+    func knownSummonAI(t : Text) : Bool {
+        t == "hunter" or t == "guardian" or t == "archer" or t == "kiter"
+            or t == "bomber" or t == "kamikaze" or t == "healer"
+    };
+
+    func knownPieceType(t : Text) : Bool {
+        t == "king" or t == "queen" or t == "pawn"
+            or t == "rook" or t == "bishop" or t == "knight"
+            or t == "wolf" or t == "golem" or t == "archer"
+            or t == "bomber" or t == "wisp"
     };
 
     /// Extends the existing apCost/range/damage caps with enum and relationship checks.
@@ -320,13 +391,19 @@ module {
         if (config.damage > 9999) { return ?"damage must be at most 9999" };
         if (config.healAmount > 1000) { return ?"healAmount must be at most 1000" };
         if (not knownSpellType(config.spellType)) {
-            return ?"spellType must be damage, heal, or drain";
+            return ?"spellType must be damage, heal, drain, or summon";
         };
         if (not knownEffectType(config.effectType)) {
             return ?"effectType is not a recognized value";
         };
         if (not knownEffectCategory(config.effectCategory)) {
             return ?"effectCategory is not a recognized value";
+        };
+        if (config.spellType == "summon" and not config.isSummon) {
+            return ?"spellType summon requires isSummon";
+        };
+        if (config.effectType == "summon" and not config.isSummon) {
+            return ?"effectType summon requires isSummon";
         };
         if (config.hitTiles.size() > 64) {
             return ?"hitTiles exceeds maximum of 64";
@@ -340,6 +417,44 @@ module {
                 };
             };
         };
+        // Summon metadata is optional on non-summons (empty AI, 0 scales).
+        // isSummon=true with empty AI used to pass; spawnSummonUnit then does
+        // `spell.summonAI || "hunter"` and silently rewrites the unit.
+        if (config.isSummon) {
+            if (not knownSummonAI(config.summonAI)) {
+                return ?"summonAI must be a known archetype";
+            };
+            if (not knownPieceType(config.summonUnitDef.pieceType)) {
+                return ?"summonUnitDef.pieceType is not a recognized value";
+            };
+        } else {
+            if (config.summonAI != "") {
+                return ?"summonAI must be empty when isSummon is false";
+            };
+            if (config.summonUnitDef.pieceType != "" and not knownPieceType(config.summonUnitDef.pieceType)) {
+                return ?"summonUnitDef.pieceType is not a recognized piece type";
+            };
+        };
+        if (config.summonLifespan > 20) {
+            return ?"summonLifespan cannot exceed 20";
+        };
+        if (config.summonUnitDef.level > 99) {
+            return ?"summonUnitDef.level cannot exceed 99";
+        };
+        switch (finiteInRange("summonUnitDef.hpScale", config.summonUnitDef.hpScale, 0.0, 10.0)) {
+            case (?e) { return ?e };
+            case null {};
+        };
+        switch (finiteInRange("summonUnitDef.damageScale", config.summonUnitDef.damageScale, 0.0, 10.0)) {
+            case (?e) { return ?e };
+            case null {};
+        };
+        null
+    };
+
+    public func validateBossPortalAssignment(portalId : Text, bossId : Text) : ?Text {
+        switch (requireId(portalId, "Portal")) { case (?e) { return ?e }; case null {} };
+        switch (requireId(bossId, "Boss")) { case (?e) { return ?e }; case null {} };
         null
     };
 
@@ -351,6 +466,30 @@ module {
         };
         if (config.triggerChance > 100) {
             return ?"Invalid chance value: triggerChance must be between 0 and 100";
+        };
+        null
+    };
+
+    public func validateMapModifierChance(id : Text, chance : Nat) : ?Text {
+        switch (requireId(id, "Map modifier")) { case (?e) { return ?e }; case null {} };
+        if (chance > 100) {
+            return ?"chance must be between 0 and 100";
+        };
+        null
+    };
+
+    /// adminAddDokaToUser used to credit target A and mark any purchaseId
+    /// completed, including a pending record owned by B.
+    public func purchaseCreditRejected(
+        recOwnerText : Text,
+        creditedText : Text,
+        status : Text,
+    ) : ?Text {
+        if (recOwnerText != creditedText) {
+            return ?"purchaseId does not belong to the credited principal";
+        };
+        if (status != "pending") {
+            return ?"purchase is not pending";
         };
         null
     };
@@ -373,11 +512,29 @@ module {
         null
     };
 
+    public func knownAchievementCondition(condition : Text) : Bool {
+        condition == "first_battle_win"
+            or condition == "survive_1hp"
+            or condition == "spell_level_5"
+            or condition == "doka_1000"
+            or condition == "explore_25_maps"
+            or condition == "betrayal_witness"
+            or condition == "leader_slayer"
+            or condition == "jackpot_heal"
+            or condition == "loot_10_doka"
+            or condition == "double_betrayal"
+            or condition == "level_10"
+            or condition == "spell_master_8"
+            or condition == "critical_5_in_battle"
+            or condition == "pacifist_run"
+            or condition == "doka_10000"
+    };
+
     public func validateAchievementConfig(config : Types.AchievementConfig) : ?Text {
         switch (requireId(config.id, "Achievement")) { case (?e) { return ?e }; case null {} };
         switch (requireName(config.name, "Achievement")) { case (?e) { return ?e }; case null {} };
-        if (config.condition == "" or config.condition.size() > MAX_ID) {
-            return ?"condition is missing or too long";
+        if (not knownAchievementCondition(config.condition)) {
+            return ?"condition is not a recognized value";
         };
         if (config.dokaReward > 1_000_000) {
             return ?"dokaReward exceeds maximum of 1000000";
@@ -468,10 +625,87 @@ module {
         if (depth > MAX_DUNGEON_DEPTH) { MAX_DUNGEON_DEPTH } else { depth }
     };
 
+    /// Official overworld / heal max HP: floor(100 * (1 + (level-1) * growth/100)).
+    /// For integer percents this is 100 + (level-1) * growthPercent.
+    /// saveBattleStats used level*200+100, so a raw client persisted 300 HP at level 1.
+    public func maxPersistedHp(level : Nat, growthPercent : Nat) : Nat {
+        let lvl = if (level < 1) { 1 } else { level };
+        let growth = if (growthPercent < 1) { 1 } else { growthPercent };
+        100 + (lvl - 1) * growth
+    };
+
+    /// Absolute HP writes must not silently cut HP already stored under a
+    /// wider historical cap (level*200+100) or after admin lowers
+    /// statGrowthPercent. New rows still cannot exceed the official max.
+    public func persistHpWriteCap(storedHp : Nat, level : Nat, growthPercent : Nat) : Nat {
+        let allowed = maxPersistedHp(level, growthPercent);
+        if (storedHp > allowed) { storedHp } else { allowed }
+    };
+
+    /// Official battle AP: PLAYER_BASE_AP + floor(level / apMpLevelThreshold).
+    /// saveBattleStats used a flat 20 cap, so a raw client persisted 20 AP at
+    /// level 1. Starter create still allows 10; persistApWriteCap grandfathers
+    /// that stored value the same way persistHpWriteCap does.
+    public func maxPersistedAp(level : Nat, threshold : Nat) : Nat {
+        let lvl = if (level < 1) { 1 } else { level };
+        let every = if (threshold < 1) { 1 } else { threshold };
+        let grown = PLAYER_BASE_AP + (lvl / every);
+        if (grown > MAX_PERSISTED_AP) { MAX_PERSISTED_AP } else { grown }
+    };
+
+    public func persistApWriteCap(storedAp : Nat, level : Nat, threshold : Nat) : Nat {
+        let allowed = maxPersistedAp(level, threshold);
+        if (storedAp > allowed) { storedAp } else { allowed }
+    };
+
+    public func maxPersistedMp(level : Nat, threshold : Nat) : Nat {
+        let lvl = if (level < 1) { 1 } else { level };
+        let every = if (threshold < 1) { 1 } else { threshold };
+        let grown = PLAYER_BASE_MP + (lvl / every);
+        if (grown > MAX_PERSISTED_MP) { MAX_PERSISTED_MP } else { grown }
+    };
+
+    public func persistMpWriteCap(storedMp : Nat, level : Nat, threshold : Nat) : Nat {
+        let allowed = maxPersistedMp(level, threshold);
+        if (storedMp > allowed) { storedMp } else { allowed }
+    };
+
+    /// Server-checkable achievement conditions. Combat feats stay client-trusted
+    /// only when the condition is in the known catalog. An unknown string used
+    /// to pass, so adminSetAchievementConfig(condition="instant", dokaReward=1e6)
+    /// let any player markAchievementUnlocked + claim.
+    public func achievementUnlockRejected(
+        condition : Text,
+        bestLevel : Nat,
+        doka : Nat,
+        bestSpellLevel : Nat,
+    ) : ?Text {
+        if (not knownAchievementCondition(condition)) {
+            ?"condition is not a recognized value"
+        } else if (condition == "level_10" and bestLevel < 10) {
+            ?"Level below 10"
+        } else if (condition == "doka_1000" and doka < 1000) {
+            ?"Doka balance below 1000"
+        } else if (condition == "doka_10000" and doka < 10000) {
+            ?"Doka balance below 10000"
+        } else if (condition == "spell_level_5" and bestSpellLevel < 5) {
+            ?"No spell at level 5"
+        } else { null }
+    };
+
+    /// completeBossRushRoom used to increment totalBossRushRuns on every
+    /// roomIndex=9 while currentRoom stayed 9. Official final-room persist
+    /// resets currentRoom first, then complete(9) (already a no-op).
+    public func shouldCountBossRushRun(currentRoom : Nat, roomIndex : Nat) : Bool {
+        roomIndex == 9 and currentRoom == 9
+    };
+
     public func validateAdBox(index : Nat, imageUrl : Text, linkUrl : Text) : ?Text {
         if (index >= 3) { return ?"index out of range: must be 0, 1, or 2" };
         switch (validateRequiredUrl("imageUrl", imageUrl)) { case (?e) { return ?e }; case null {} };
+        switch (requireHttpsUrl("imageUrl", imageUrl)) { case (?e) { return ?e }; case null {} };
         switch (validateRequiredUrl("linkUrl", linkUrl)) { case (?e) { return ?e }; case null {} };
+        switch (requireHttpsUrl("linkUrl", linkUrl)) { case (?e) { return ?e }; case null {} };
         null
     };
 

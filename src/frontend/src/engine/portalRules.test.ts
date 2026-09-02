@@ -213,6 +213,8 @@ describe("rest-exit dungeon spawn", () => {
     assert.equal(restExitSpawnDepth("dungeon"), 1);
     assert.equal(shouldArmDungeonChainOnRestExit("normal"), false);
     assert.equal(restExitSpawnDepth("normal"), 0);
+    assert.equal(shouldArmDungeonChainOnRestExit("boss"), false);
+    assert.equal(restExitSpawnDepth("boss"), 0);
     assert.equal(shouldArmDungeonChainOnRestExit(undefined), false);
   });
 });

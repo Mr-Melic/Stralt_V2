@@ -4,6 +4,8 @@
 **Date:** 2026-08-31  
 **Status:** PROPOSED — design only. No production code, spawn tables, or AI changes in this drop.
 
+**See also:** `docs/design/ENEMY_FORMATIONS_2026-09-01.md` — second catalog (buffer + bruiser, sniper + ward, proposed-family packs). Do not reuse these `FSN-*` ids.
+
 This catalog builds **tactically coherent packs** from pieces, families, kits, and summons that already exist. New experiences come from **who stands together**, not from new sprites.
 
 Relative difficulty uses **kit band**, **AI sophistication**, and **pack role count**. It does not pin encounters to a final player-level range. Higher progression unlocks more sophisticated compositions after the player has already answered simpler pairs.

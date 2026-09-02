@@ -3,13 +3,22 @@ import { describe, it } from "node:test";
 import { starterSpells } from "../data/spellData.ts";
 import { isActiveHostile } from "../engine/battleSetup.ts";
 import {
+  computeTargetableTiles,
+  isTileCastableLive,
+  shouldExecuteLiveCast,
+} from "../engine/targeting.ts";
+import type { Enemy, SpellConfig } from "../types/gameTypes.ts";
+import {
   canStartSummonControlCast,
   chebyshevDistance,
+  pickSummonControlClickTarget,
   planSummonControlCast,
   resolveLiveSummonAp,
   resolveSummonControlSpell,
+  shouldRouteCanvasToSummonControl,
   summonControlCastFailMessage,
   summonControlIdAfterAdvance,
+  summonControlRangeCap,
   summonTurnBudget,
 } from "./summonControlCast.ts";
 
@@ -186,27 +195,53 @@ describe("planSummonControlCast", () => {
   });
 
   it("rejects when the shared live gate says the tile is illegal", () => {
+    const tiles = Array.from({ length: 16 }, () =>
+      Array.from({ length: 16 }, () => "floor" as const),
+    );
+    tiles[8][9] = "wall";
+    const catalog = starterSpells.map((s) =>
+      s.id === "starter-poison" ? { ...s, lineOfSight: true } : s,
+    );
+    const rat = {
+      id: "rat",
+      x: 10,
+      y: 8,
+      hp: 10,
+      maxHp: 10,
+      name: "Rat",
+      pieceType: "pawn",
+      side: "enemy" as const,
+    };
     const blocked = planSummonControlCast({
       pieceType: "archer",
       spellId: "starter-poison",
-      catalog: starterSpells,
+      catalog,
       fallbackSpells: [],
       currentAp: 2,
       caster: { x: 8, y: 8 },
       target: { x: 10, y: 8 },
-      liveGate: () => false,
+      liveGate: {
+        tiles,
+        combatants: [rat as import("../types/gameTypes.ts").Enemy],
+      },
     });
-    assert.deepEqual(blocked, { ok: false, reason: "out_of_range" });
+    assert.deepEqual(blocked, { ok: false, reason: "illegal_target" });
 
+    const openTiles = Array.from({ length: 16 }, () =>
+      Array.from({ length: 16 }, () => "floor" as const),
+    );
     const open = planSummonControlCast({
       pieceType: "archer",
       spellId: "starter-poison",
-      catalog: starterSpells,
+      catalog,
       fallbackSpells: [],
       currentAp: 2,
       caster: { x: 8, y: 8 },
       target: { x: 10, y: 8 },
-      liveGate: () => true,
+      liveGate: {
+        tiles: openTiles,
+        combatants: [rat as import("../types/gameTypes.ts").Enemy],
+      },
     });
     assert.equal(open.ok, true);
   });
@@ -219,6 +254,63 @@ describe("planSummonControlCast", () => {
       "Invalid target",
     );
     assert.equal(summonControlCastFailMessage("no_spell"), "Unknown spell");
+  });
+
+  it("does not Chebyshev-reject an area expansion tile the live gate would accept", () => {
+    assert.equal(
+      summonControlRangeCap({ targetType: "area", areaRadius: 2 }, 1),
+      3,
+    );
+    assert.equal(summonControlRangeCap({ targetType: "enemy" }, 3), 3);
+    assert.equal(
+      summonControlRangeCap({ targetType: "all" }, 1),
+      Number.POSITIVE_INFINITY,
+    );
+    const tiles = Array.from({ length: 10 }, () =>
+      Array.from({ length: 10 }, () => "floor" as const),
+    );
+    const planned = planSummonControlCast({
+      pieceType: "bomber",
+      spellId: "spell-frost-nova",
+      catalog: [
+        {
+          id: "summon-bomber",
+          summonUnitDef: {
+            pieceType: "bomber",
+            summonKit: ["spell-frost-nova"],
+          },
+        },
+        {
+          id: "spell-frost-nova",
+          apCost: 4,
+          range: 1,
+          maxRange: 1,
+          targetType: "area",
+          areaRadius: 2,
+        },
+      ],
+      fallbackSpells: [],
+      currentAp: 4,
+      caster: { x: 4, y: 4 },
+      target: { x: 4, y: 6 },
+      liveGate: {
+        tiles,
+        combatants: [
+          {
+            id: "rat",
+            x: 4,
+            y: 5,
+            hp: 10,
+            maxHp: 10,
+            name: "Rat",
+            pieceType: "pawn",
+            side: "enemy",
+          } as import("../types/gameTypes.ts").Enemy,
+        ],
+        effectiveRange: 1,
+      },
+    });
+    assert.equal(planned.ok, true);
   });
 
   it("rejects a LoS-blocked kit shot when the live gate is supplied", () => {
@@ -257,6 +349,186 @@ describe("planSummonControlCast", () => {
   });
 });
 
+describe("pickSummonControlClickTarget", () => {
+  it("lets a Wisp self-heal execute on the caster tile the live gate paints", () => {
+    const tiles = Array.from({ length: 8 }, () =>
+      Array.from({ length: 8 }, () => "floor" as const),
+    );
+    const wisp = {
+      id: "wisp-1",
+      x: 3,
+      y: 3,
+      hp: 20,
+      maxHp: 20,
+      name: "Wisp",
+      pieceType: "wisp",
+      isSummon: true,
+      side: "player" as const,
+    };
+    const heal = starterSpells.find((s) => s.id === "starter-heal");
+    assert.ok(heal);
+    const self = pickSummonControlClickTarget({
+      spell: heal,
+      caster: wisp,
+      tile: { x: 3, y: 3 },
+      combatants: [wisp],
+      tiles,
+    });
+    assert.equal(self?.id, "wisp-1");
+    const empty = pickSummonControlClickTarget({
+      spell: heal,
+      caster: wisp,
+      tile: { x: 5, y: 3 },
+      combatants: [wisp],
+      tiles,
+    });
+    assert.equal(empty, null);
+  });
+
+  it("refuses a LoS-blocked hostile and accepts a highlighted legal one", () => {
+    const tiles = Array.from({ length: 10 }, () =>
+      Array.from({ length: 10 }, () => "floor" as const),
+    );
+    tiles[4][5] = "wall";
+    const archer = {
+      id: "archer-1",
+      x: 4,
+      y: 4,
+      hp: 20,
+      name: "Archer",
+      pieceType: "archer",
+      isSummon: true,
+      side: "player" as const,
+    };
+    const blocked = {
+      id: "blocked",
+      x: 7,
+      y: 4,
+      hp: 10,
+      name: "Rat",
+      pieceType: "pawn",
+      side: "enemy" as const,
+    };
+    const open = {
+      id: "open",
+      x: 4,
+      y: 7,
+      hp: 10,
+      name: "Rat",
+      pieceType: "pawn",
+      side: "enemy" as const,
+    };
+    const poison = {
+      ...starterSpells.find((s) => s.id === "starter-poison")!,
+      lineOfSight: true,
+    };
+    assert.equal(
+      pickSummonControlClickTarget({
+        spell: poison,
+        caster: archer,
+        tile: { x: 7, y: 4 },
+        combatants: [archer, blocked, open],
+        tiles,
+      })?.id,
+      undefined,
+    );
+    assert.equal(
+      pickSummonControlClickTarget({
+        spell: poison,
+        caster: archer,
+        tile: { x: 4, y: 7 },
+        combatants: [archer, blocked, open],
+        tiles,
+      })?.id,
+      "open",
+    );
+  });
+
+  it("lets a highlighted kit tile execute and refuses an illegal one", () => {
+    const tiles = Array.from({ length: 10 }, () =>
+      Array.from({ length: 10 }, () => "floor" as const),
+    );
+    tiles[4][5] = "wall";
+    const caster = { x: 4, y: 4 };
+    const open = {
+      id: "open",
+      x: 4,
+      y: 7,
+      hp: 10,
+      maxHp: 10,
+      name: "Rat",
+      pieceType: "pawn",
+      side: "enemy" as const,
+    } as Enemy;
+    const blocked = {
+      id: "blocked",
+      x: 7,
+      y: 4,
+      hp: 10,
+      maxHp: 10,
+      name: "Rat",
+      pieceType: "pawn",
+      side: "enemy" as const,
+    } as Enemy;
+    const poison = {
+      ...(starterSpells.find((s) => s.id === "starter-poison") as SpellConfig),
+      lineOfSight: true,
+    };
+    const grid = {
+      tiles,
+      enemies: [open, blocked],
+      worldGridSize: 10,
+      effectiveRange: Number(poison.range),
+      barrierTiles: new Map<string, number>(),
+    };
+    const highlighted = computeTargetableTiles(poison, caster, grid);
+    assert.equal(highlighted.has("4,7"), true);
+    assert.equal(highlighted.has("7,4"), false);
+    assert.equal(
+      shouldExecuteLiveCast(
+        isTileCastableLive(
+          poison,
+          caster,
+          { x: 4, y: 7 },
+          [open, blocked],
+          tiles,
+          Number(poison.range),
+        ),
+      ),
+      true,
+    );
+    const legal = planSummonControlCast({
+      pieceType: "archer",
+      spellId: "starter-poison",
+      catalog: [poison, ...starterSpells],
+      currentAp: 4,
+      caster,
+      target: { x: 4, y: 7 },
+      liveGate: {
+        tiles,
+        combatants: [open, blocked],
+        effectiveRange: Number(poison.range),
+      },
+    });
+    assert.equal(legal.ok, true);
+    const illegal = planSummonControlCast({
+      pieceType: "archer",
+      spellId: "starter-poison",
+      catalog: [poison, ...starterSpells],
+      currentAp: 4,
+      caster,
+      target: { x: 7, y: 4 },
+      liveGate: {
+        tiles,
+        combatants: [open, blocked],
+        effectiveRange: Number(poison.range),
+      },
+    });
+    assert.equal(illegal.ok, false);
+    if (!illegal.ok) assert.equal(illegal.reason, "illegal_target");
+  });
+});
+
 describe("summonControlIdAfterAdvance", () => {
   it("drops leftover control when the next combatant is the player or an enemy", () => {
     assert.equal(summonControlIdAfterAdvance({ id: "player" }), null);
@@ -289,6 +561,44 @@ describe("summonControlIdAfterAdvance", () => {
     );
     assert.equal(summonControlIdAfterAdvance(null), null);
     assert.equal(summonControlIdAfterAdvance(undefined), null);
+  });
+});
+
+describe("shouldRouteCanvasToSummonControl", () => {
+  it("stops capturing clicks after room-clear even if the wolf is still live", () => {
+    assert.equal(
+      shouldRouteCanvasToSummonControl({
+        inBattle: true,
+        controlledSummonId: "wolf-1",
+        summonStillLive: true,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldRouteCanvasToSummonControl({
+        inBattle: false,
+        controlledSummonId: "wolf-1",
+        summonStillLive: true,
+      }),
+      false,
+      "Boss Rush leftover control must not walk the summon instead of the player",
+    );
+    assert.equal(
+      shouldRouteCanvasToSummonControl({
+        inBattle: false,
+        controlledSummonId: "wolf-1",
+        summonStillLive: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldRouteCanvasToSummonControl({
+        inBattle: true,
+        controlledSummonId: null,
+        summonStillLive: true,
+      }),
+      false,
+    );
   });
 });
 

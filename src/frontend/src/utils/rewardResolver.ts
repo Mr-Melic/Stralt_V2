@@ -1,6 +1,9 @@
 import type { BattleRecapData } from "../components/PostBattleRecap";
 import { countsTowardKillRewards } from "../engine/battleSetup.ts";
-import { readApplyRewardsOk } from "./applyRewardsResult.ts";
+import {
+  clampApplyRewardsDeltas,
+  readApplyRewardsOk,
+} from "./applyRewardsResult.ts";
 import {
   type CompletedChallengeReward,
   addChallengeRewardDeltas,
@@ -9,7 +12,10 @@ import { xpForNextLevel } from "./xpCurve.ts";
 
 export type { ApplyRewardsOk } from "./applyRewardsResult.ts";
 export {
+  APPLY_REWARDS_MAX_DOKA_DELTA,
+  APPLY_REWARDS_MAX_XP_DELTA,
   PORTAL_TRANSITION_XP,
+  clampApplyRewardsDeltas,
   persistIncrementalRewards,
   readApplyRewardsOk,
 } from "./applyRewardsResult.ts";
@@ -160,10 +166,14 @@ export function computeRewardDeltas(input: RewardInput): {
     xpDelta += input.bossRushRoomReward.xp;
   }
 
+  const clamped = clampApplyRewardsDeltas(dokaDelta, xpDelta);
   return {
-    dokaDelta: Math.max(0, dokaDelta),
-    xpDelta: Math.max(0, xpDelta),
-    dokaFromChallenges,
+    dokaDelta: clamped.dokaDelta,
+    xpDelta: clamped.xpDelta,
+    dokaFromChallenges: Math.min(
+      clamped.dokaDelta,
+      Math.max(0, dokaFromChallenges),
+    ),
   };
 }
 

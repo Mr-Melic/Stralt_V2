@@ -7,8 +7,10 @@ import {
   mapPurchaseRecordFromBackend,
   purchaseTimestampMs,
   readAdminCmdResult,
+  readPrincipalListResult,
   readPurchasesResult,
   toBackendEnemySpriteUrl,
+  toBackendLevelUpConfig,
   toBackendPlayerSpriteConfig,
   toBackendSpellConfig,
 } from "./adminContract.ts";
@@ -85,6 +87,25 @@ describe("purchase mapping", () => {
     );
   });
 
+  it("unwraps getBannedPrincipals #ok into principal texts", () => {
+    const list = readPrincipalListResult(
+      {
+        __kind__: "ok",
+        ok: [{ toText: () => "aaaaa-aa" }, "bbbbb-bb"],
+      },
+      "getBannedPrincipals",
+    );
+    assert.deepEqual(list, ["aaaaa-aa", "bbbbb-bb"]);
+    assert.throws(
+      () =>
+        readPrincipalListResult(
+          { __kind__: "err", err: "Unauthorized: admin only" },
+          "getBannedPrincipals",
+        ),
+      /Unauthorized/,
+    );
+  });
+
   it("converts Motoko ns timestamps to ms", () => {
     assert.equal(
       purchaseTimestampMs(1_700_000_000_000_000_000n),
@@ -127,6 +148,15 @@ describe("sprite / spell / enemy field bridges", () => {
     });
     assert.equal(wire.multiTarget, true);
     assert.equal(wire.cooldown, 0n);
+    assert.equal(wire.isSummon, false);
+    assert.equal(wire.summonAI, "");
+    assert.equal(wire.summonLifespan, 0n);
+    assert.deepEqual(wire.summonUnitDef, {
+      pieceType: "",
+      level: 0n,
+      hpScale: 0,
+      damageScale: 0,
+    });
     const ui = fromBackendSpellConfig({
       id: "bolt",
       multiTarget: true,
@@ -134,6 +164,48 @@ describe("sprite / spell / enemy field bridges", () => {
     });
     assert.equal(ui.hitsMultiple, true);
     assert.equal(ui.cooldown, 3);
+    assert.equal(ui.isSummon, false);
+    assert.equal(ui.summonLifespan, 0);
+  });
+
+  it("keeps explicit summon metadata and drops extra unit-def keys", () => {
+    const wire = toBackendSpellConfig({
+      id: "summon-wolf",
+      isSummon: true,
+      summonAI: "hunter",
+      summonLifespan: 4,
+      summonUnitDef: {
+        pieceType: "pawn",
+        level: 2,
+        hpScale: 1.2,
+        damageScale: 0.8,
+        summonKit: ["bite"],
+        ap: 3,
+      },
+    });
+    assert.equal(wire.isSummon, true);
+    assert.equal(wire.summonAI, "hunter");
+    assert.equal(wire.summonLifespan, 4n);
+    assert.deepEqual(wire.summonUnitDef, {
+      pieceType: "pawn",
+      level: 2n,
+      hpScale: 1.2,
+      damageScale: 0.8,
+    });
+    const ui = fromBackendSpellConfig({
+      id: "summon-wolf",
+      isSummon: true,
+      summonAI: "hunter",
+      summonLifespan: 4n,
+      summonUnitDef: {
+        pieceType: "pawn",
+        level: 2n,
+        hpScale: 1.2,
+        damageScale: 0.8,
+      },
+    });
+    assert.equal(ui.summonLifespan, 4);
+    assert.equal(ui.summonUnitDef?.level, 2);
   });
 
   it("does not treat an empty spriteUrl tuple as a custom asset", () => {
@@ -142,5 +214,45 @@ describe("sprite / spell / enemy field bridges", () => {
       toBackendEnemySpriteUrl(["https://x/e.png"]),
       "https://x/e.png",
     );
+  });
+});
+
+describe("toBackendLevelUpConfig", () => {
+  it("writes all nine canister fields and maps the frontend AP/MP alias", () => {
+    const wire = toBackendLevelUpConfig({
+      statGrowthPercent: 7,
+      apMpGrowthEveryNLevels: 30,
+      spellLevelingBaseCost: 15,
+      spellLevelingCostMultiplier: 2.5,
+      spellDmgGrowthPercent: 4,
+      maxSpellRange: 6,
+      spellRangeGrowthLevels: 12,
+      spellFailBaseChance: 18,
+      spellFailReductionPerLevel: 0.05,
+    });
+    assert.equal(wire.statGrowthPercent, 7n);
+    assert.equal(wire.apMpLevelThreshold, 30n);
+    assert.equal(wire.spellLevelingBaseCost, 15n);
+    assert.equal(wire.spellLevelingCostMultiplier, 2.5);
+    assert.equal(wire.spellDmgGrowthPercent, 4n);
+    assert.equal(wire.maxSpellRange, 6n);
+    assert.equal(wire.spellRangeGrowthLevels, 12n);
+    assert.equal(wire.spellFailBaseChance, 18);
+    assert.equal(wire.spellFailReductionPerLevel, 0.05);
+  });
+
+  it("does not clobber omitted growth/cost fields with a 4-field draft", () => {
+    const wire = toBackendLevelUpConfig({
+      maxSpellRange: 8,
+      spellRangeGrowthLevels: 9,
+      spellFailBaseChance: 10,
+      spellFailReductionPerLevel: 0.2,
+    });
+    assert.equal(wire.maxSpellRange, 8n);
+    assert.equal(wire.statGrowthPercent, 5n);
+    assert.equal(wire.apMpLevelThreshold, 25n);
+    assert.equal(wire.spellLevelingBaseCost, 10n);
+    assert.equal(wire.spellLevelingCostMultiplier, 2);
+    assert.equal(wire.spellDmgGrowthPercent, 3n);
   });
 });

@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useMemo, useRef } from "react";
+import { shouldRunDecorativeCanvasLoop } from "../engine/canvasLoopActivity";
 import { useActor } from "../hooks/useActor";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { safeExternalHref, unsafeUrl } from "../utils/adminSafety";
@@ -139,9 +140,17 @@ const SkateStyleTitle: React.FC = () => {
       currentX += letterWidth + letterSpacing;
     }
 
-    let animationId: number;
+    let animationId = 0;
+    let stopped = false;
 
     const animate = () => {
+      if (stopped) return;
+      // PERF-2026-09-02-058: stop the logo RAF while the tab is hidden.
+      // Does not replace shadowBlur (see PERF-054).
+      if (!shouldRunDecorativeCanvasLoop(document.hidden)) {
+        animationId = 0;
+        return;
+      }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       for (const letter of letters) {
@@ -176,9 +185,28 @@ const SkateStyleTitle: React.FC = () => {
       animationId = requestAnimationFrame(animate);
     };
 
-    animate();
+    const startLoop = () => {
+      if (stopped) return;
+      if (!shouldRunDecorativeCanvasLoop(document.hidden)) return;
+      if (animationId) return;
+      animationId = requestAnimationFrame(animate);
+    };
+
+    const onVisibility = () => {
+      if (!shouldRunDecorativeCanvasLoop(document.hidden)) {
+        if (animationId) cancelAnimationFrame(animationId);
+        animationId = 0;
+        return;
+      }
+      startLoop();
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    startLoop();
 
     return () => {
+      stopped = true;
+      document.removeEventListener("visibilitychange", onVisibility);
       if (animationId) cancelAnimationFrame(animationId);
     };
   }, []);
@@ -343,9 +371,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onAdminLogin }) => {
 
   return (
     <div
+      className="min-h-app-viewport"
       style={{
         position: "relative",
-        minHeight: "100vh",
         width: "100%",
         display: "flex",
         flexDirection: "column",

@@ -13,7 +13,9 @@ import { logDebugInfo } from "../utils/debugLogger.ts";
 import {
   type OccupancyContext,
   findNearestFreeCell,
+  progressionSearchRadius,
   isCellFree as sharedIsCellFree,
+  unsealProgressionOccupants,
 } from "./occupancy.ts";
 import { getSummonBaseStats } from "./progression.ts";
 
@@ -107,16 +109,30 @@ export function spawnSummonUnit(
 
   // Spawn placement: if an occupancy context is provided and the requested
   // cell is not free (occupied / impassable / barrier / void / portal), fall
-  // back to the nearest free cell within a 3-tile radius. Backward-compatible —
-  // callers that omit occupancyCtx keep the original behavior.
-  // Reserved cells are unique progression bridges — prefer any other free
-  // tile so a summon cannot permanently seal the exit.
+  // back to the nearest free cell on this grid. Radius 6 used to miss an
+  // off-path alcove at the far end of a 16×16 unique corridor.
   let spawnCell = cell;
   const reserved = occupancyCtx?.reserved;
   const reservedHit = reserved?.has(`${cell.x},${cell.y}`) === true;
   if (occupancyCtx && (!sharedIsCellFree(cell, occupancyCtx) || reservedHit)) {
-    const fallback = findNearestFreeCell(cell, occupancyCtx, 6, reserved);
+    const fallback = findNearestFreeCell(
+      cell,
+      occupancyCtx,
+      progressionSearchRadius(occupancyCtx),
+      reserved,
+    );
     if (fallback) spawnCell = fallback;
+  }
+  if (occupancyCtx?.progressStart && occupancyCtx.portals.size > 0) {
+    const [slid] = unsealProgressionOccupants(
+      [spawnCell],
+      occupancyCtx.tiles,
+      occupancyCtx.voidTiles,
+      occupancyCtx.portals,
+      occupancyCtx.progressStart,
+      occupancyCtx,
+    );
+    spawnCell = slid;
   }
 
   const stats = computeEnemyStats(level, unitDef.pieceType, spell.id);

@@ -143,6 +143,20 @@ export interface EnemyConfig {
   'spriteUrl' : [] | [string],
   'regions' : Array<string>,
 }
+export interface GameKeyRequest {
+  'id' : string,
+  'redeemedAt' : bigint,
+  'redeemedBy' : string,
+  'status' : string,
+  'emailed' : boolean,
+  'emailConsent' : boolean,
+  'approvedAt' : bigint,
+  'dokaAmount' : bigint,
+  'email' : string,
+  'userPrincipal' : Principal,
+  'timestamp' : bigint,
+  'hintedEuroCents' : bigint,
+}
 export interface LevelUpConfig {
   'spellLevelingCostMultiplier' : number,
   'spellLevelingBaseCost' : bigint,
@@ -288,6 +302,15 @@ export interface _SERVICE {
       { 'err' : string }
   >,
   /**
+   * / Admin: after Mollie payment, set Doka worth and mint a 120-char GameKey
+   * / from IC `raw_rand`. Returns the code once; store it only in the reveal map.
+   */
+  'adminApproveGameKeyPurchase' : ActorMethod<
+    [string, bigint],
+    { 'ok' : string } |
+      { 'err' : string }
+  >,
+  /**
    * / Admin: ban a principal for non-payment.
    * / M2: also clears achievement progress so banned players cannot double-claim
    * /     Doka rewards after being unbanned.
@@ -355,6 +378,14 @@ export interface _SERVICE {
       { 'err' : string }
   >,
   /**
+   * / Admin: one-time reveal until marked emailed. Empty #err if already wiped.
+   */
+  'adminGetGameKeyReveal' : ActorMethod<
+    [string],
+    { 'ok' : string } |
+      { 'err' : string }
+  >,
+  /**
    * / Admin: get all purchase records, optionally filtered by principal text.
    */
   'adminGetPurchaseRecords' : ActorMethod<
@@ -368,6 +399,31 @@ export interface _SERVICE {
    */
   'adminGrantDoka' : ActorMethod<
     [Principal, bigint],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
+  /**
+   * / Admin: incoming GameKey purchase requests. No plaintext codes.
+   */
+  'adminListGameKeyRequests' : ActorMethod<
+    [],
+    { 'ok' : Array<GameKeyRequest> } |
+      { 'err' : string }
+  >,
+  /**
+   * / Admin: confirm the code was copied/mailed. Wipes the plaintext reveal.
+   * / The canister cannot send email; this is the honest hand-off.
+   */
+  'adminMarkGameKeyEmailed' : ActorMethod<
+    [string],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
+  /**
+   * / Admin: payment never arrived.
+   */
+  'adminRejectGameKeyPurchase' : ActorMethod<
+    [string],
     { 'ok' : null } |
       { 'err' : string }
   >,
@@ -549,6 +605,15 @@ export interface _SERVICE {
     { 'ok' : null } |
       { 'err' : string }
   >,
+  /**
+   * / Appearance edits used to union incoming spell arrays and take
+   * / max(existing, incoming) per id. A custom client could then:
+   * /   1. inject a retired catalog id the player never owned, after which
+   * /      upgradeSpell treats `found=true` and skips the retirement check;
+   * /   2. raise paid levels without going through upgradeSpell.
+   * / Official CharacterCreation only rewrites cosmetics and already sends
+   * / the stored keys (or []). Keep the store. upgradeSpell is the sole writer.
+   */
   'createCharacter' : ActorMethod<
     [bigint, Character],
     { 'ok' : null } |
@@ -715,6 +780,10 @@ export interface _SERVICE {
    */
   'getMessages' : ActorMethod<[], Array<ChatMessage>>,
   /**
+   * / Player-visible status for the latest request. Never includes a GameKey.
+   */
+  'getMyGameKeyPurchaseStatus' : ActorMethod<[], [] | [GameKeyRequest]>,
+  /**
    * / Returns the caller's purchase history.
    */
   'getMyPurchaseHistory' : ActorMethod<[], Array<PurchaseRecord>>,
@@ -780,9 +849,8 @@ export interface _SERVICE {
    */
   'initDefaultNames' : ActorMethod<[], undefined>,
   /**
-   * / Player initiates a purchase — creates a pending record.
-   * / Returns the purchase id so the frontend can track it.
-   * / H5: Accepts all customer fields including proofFileUrl.
+   * / Legacy nine-arg KYC checkout. Replaced by requestGameKeyPurchase.
+   * / Signature kept so older clients fail with a clear #err instead of minting.
    */
   'initiatePurchase' : ActorMethod<
     [string, string, string, string, string, string, string, string, string],
@@ -809,7 +877,8 @@ export interface _SERVICE {
    */
   'markChangelogShown' : ActorMethod<[string], undefined>,
   /**
-   * / Player calls this to trigger auto-completion of their pending purchases.
+   * / Kept so shop remount still calls a no-op credit that honors
+   * / shouldCommitShopCredit (commit only when the wallet actually gained).
    */
   'processPendingPurchases' : ActorMethod<[], bigint>,
   /**
@@ -821,11 +890,27 @@ export interface _SERVICE {
       { 'err' : string }
   >,
   /**
+   * / Player: redeem a 120-char GameKey. Credits the caller, not the requester.
+   */
+  'redeemGameKey' : ActorMethod<
+    [string],
+    { 'ok' : bigint } |
+      { 'err' : string }
+  >,
+  /**
    * / Rename a character in the given slot. Costs 100 Doka from the character's balance.
    */
   'renameCharacter' : ActorMethod<
     [bigint, string],
     { 'ok' : null } |
+      { 'err' : string }
+  >,
+  /**
+   * / Player: submit a GameKey purchase request (email + consent, optional euro hint).
+   */
+  'requestGameKeyPurchase' : ActorMethod<
+    [string, boolean, bigint],
+    { 'ok' : string } |
       { 'err' : string }
   >,
   /**

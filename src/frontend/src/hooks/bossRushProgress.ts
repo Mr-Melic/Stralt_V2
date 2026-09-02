@@ -164,6 +164,13 @@ export async function persistBossRushRewardsThroughLock<T>(
  * completeBossRushRoom is progress-only (0, 0). A failure there after
  * currentRoom already advanced must not skip the wallet credit — reload
  * cannot re-farm that room.
+ *
+ * Final-room complete must run while still occupying room 9. Reset-then-
+ * complete(9) is #err (roomIndex 9 vs currentRoom 0), so master complete,
+ * run count, and highestRoomCompleted=10 never landed. Complete first;
+ * the canister zeros currentRoom on a counted run so repeat complete(9)
+ * still cannot farm. Reset afterward so a failed complete cannot leave
+ * the jackpot resumable.
  */
 export async function persistBossRushRoomClear(
   actor: BossRushProgressActor,
@@ -174,12 +181,25 @@ export async function persistBossRushRoomClear(
   const { nextCurrentRoom, runComplete } =
     progressAfterRoomClear(clearedRoomIndex);
   const slotId = BigInt(slot);
+  const completeClearedRoom = async () => {
+    try {
+      await actor.completeBossRushRoom?.(
+        slotId,
+        BigInt(clearedRoomIndex),
+        BigInt(0),
+        BigInt(0),
+      );
+    } catch {
+      // currentRoom already advanced (or will reset); do not block applyRewards.
+    }
+  };
   if (runComplete) {
     if (typeof actor.resetBossRush !== "function") {
       throw new Error(
         "resetBossRush is required to persist a final-room clear",
       );
     }
+    await completeClearedRoom();
     await actor.resetBossRush(slotId);
   } else {
     if (typeof actor.setBossRushProgress !== "function") {
@@ -188,16 +208,7 @@ export async function persistBossRushRoomClear(
       );
     }
     await actor.setBossRushProgress(slotId, BigInt(nextCurrentRoom));
-  }
-  try {
-    await actor.completeBossRushRoom?.(
-      slotId,
-      BigInt(clearedRoomIndex),
-      BigInt(0),
-      BigInt(0),
-    );
-  } catch {
-    // currentRoom already advanced; do not block applyRewards.
+    await completeClearedRoom();
   }
   if (options?.wasSuperseded?.()) {
     try {

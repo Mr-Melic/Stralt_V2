@@ -4,41 +4,41 @@
  * `computeTargetableTiles` is the body of `getSpellRangeTiles` (formerly lines
  * 5998-6172 of WorldExploration.tsx) lifted into a React-free, DOM-free pure
  * function. The wrapper in WorldExploration.tsx retains:
- *   - the `useCallback` shell,
- *   - the `spellRangeCacheRef` cache check + set, and
- *   - the `battleOnlyHealBuffSpellsRef.current = false` side-effect (#19 Pacifist Run).
+ *   - the `useCallback` shell, and
+ *   - the `spellRangeCacheRef` cache check + set.
+ * Pacifist Run flips only on a resolved offensive cast
+ * (`recordPlayerSpellType`). Range preview must not call
+ * `applyHealBuffSideEffect` — `getSpellRangeTiles` runs every RAF frame.
  *
  * What moves here:
- *   - the `self` / `all` early-returns,
- *   - the Manhattan ground branch (ground + isBarrier spells), and
- *   - the Chebyshev area/enemy branch (with Bresenham LoS, area expansion).
+ *   - the live-ok tile scan (`computeTargetableTiles` === `isTileCastableLive`),
+ *   - Manhattan ground / Chebyshev enemy / line / ally / self / all geometry,
+ *   - Bresenham LoS + area expansion.
  *
  * The wrapper precomputes `effectiveRange` (a number) by calling
  * `getEffectiveSpellRange(baseRange, spell.modifiableRange ? spell.id : undefined)`
  * and passes it in via `gridState.effectiveRange`. The pure function NEVER
  * calls back into React state or callbacks.
  *
- * Canonical targeting rules preserved verbatim:
+ * Canonical targeting rules live only in `isTileCastableLive`:
  *   - ground / barrier spells use MANHATTAN distance (|dx|+|dy| <= range),
  *   - area / enemy spells use CHEBYSHEV distance (max(|dx|,|dy|) <= range).
- * This asymmetry is intentional and is the single source of truth for both the
- * blue preview highlights and the castability check.
+ * The highlight set is that live-ok set — preview and execute cannot drift.
  */
 
 import type { Enemy, SpellConfig } from "../types/gameTypes";
 import { isActiveHostile } from "./battleSetup.ts";
 
 /**
- * #19 Pacifist Run side-effect: flip the `battleOnlyHealBuffSpellsRef` flag to
- * false the moment the player selects ANY offensive spell. Kept here (next to
- * the targeting geometry it relates to) so the wrapper in WorldExploration.tsx
- * is a single one-line call instead of an inline ~25-line block.
+ * #19 Pacifist Run: flip `battleOnlyHealBuffSpellsRef` false when an
+ * offensive spell is actually resolved. Call from the cast path only.
+ * Range highlight / `getSpellRangeTiles` must not call this.
  *
  * The ref is a React ref owned by the component, so it is passed in as a
- * parameter rather than imported — this keeps the helper pure-ish and
- * testable in isolation.
+ * parameter rather than imported — this keeps the helper testable.
  *
- * Offensive categories mirror the original inline list verbatim.
+ * Offensive categories mirror `recordPlayerSpellType` plus target-type
+ * and physical flags from the original inline list.
  */
 const OFFENSIVE_SPELL_CATEGORIES = [
   "damage",
@@ -71,6 +71,17 @@ export function applyHealBuffSideEffect(
   ) {
     ref.current = false;
   }
+}
+
+/**
+ * `getSpellRangeTiles` used to call {@link applyHealBuffSideEffect} on
+ * every highlight recompute. Selecting Strike to see the blue ring then
+ * failed Pacifist Run even when the player never cast.
+ *
+ * The cast path (`recordPlayerSpellType` / execute) stays the only flip.
+ */
+export function shouldApplyHealBuffSideEffectOnRangePreview(): boolean {
+  return false;
 }
 
 /** Tile cell kind used by the world grid. */
@@ -112,6 +123,124 @@ export function playerSpellRequiresLos(spell: {
   lineOfSight?: boolean;
 }): boolean {
   return !!spell.lineOfSight;
+}
+
+/**
+ * Enemy / summon-AI range. Starter kits have no `maxRange` growth path;
+ * using {@link spellRangeBase} here would extend bishop frost (and similar)
+ * without a data change. Keep `Number(spell.range)` so AI is not rebalanced.
+ */
+export function enemySpellRange(
+  spell: Pick<SpellConfig, "range"> | { range?: unknown },
+): number {
+  return Number(spell.range);
+}
+
+/**
+ * Enemy / summon-AI LoS: default ON (`!== false`). Player clicks stay on
+ * {@link playerSpellRequiresLos}. Do not merge the two policies.
+ */
+export function enemySpellRequiresLos(spell: {
+  lineOfSight?: boolean;
+}): boolean {
+  return spell.lineOfSight !== false;
+}
+
+/**
+ * Shared enemy-cast geometry: Chebyshev vs {@link enemySpellRange}, then
+ * LoS only when {@link enemySpellRequiresLos}. decideCaster used to require
+ * LoS even for `lineOfSight === false` while generic / hunter / archer and
+ * `findNearestLegalCastTile` honored the flag.
+ *
+ * {@link enemyCastRangeOk} is the range half used by healer / guardian /
+ * bomber (they still skip LoS on purpose). Do not merge those policies.
+ */
+export function enemyCastRangeOk(
+  origin: CasterPosition,
+  target: CasterPosition,
+  spell: Pick<SpellConfig, "range">,
+): boolean {
+  return chebyshevOnBoard(origin, target) <= enemySpellRange(spell);
+}
+
+export function enemyCastGeometryOk(args: {
+  origin: CasterPosition;
+  target: CasterPosition;
+  spell: Pick<SpellConfig, "range"> & { lineOfSight?: boolean };
+  hasLoS: boolean;
+}): boolean {
+  if (!enemyCastRangeOk(args.origin, args.target, args.spell)) {
+    return false;
+  }
+  if (enemySpellRequiresLos(args.spell) && !args.hasLoS) return false;
+  return true;
+}
+
+/**
+ * Only `self` / `ally` / `all` may use the caster tile. Area expansion
+ * used to paint that tile; mouse/touch then rejected it with a second
+ * WorldExploration guard, so a highlighted cell could not execute.
+ */
+export function playerSpellAllowsCasterTile(spell: {
+  targetType?: string;
+}): boolean {
+  const t = (spell.targetType ?? "enemy") as string;
+  return t === "self" || t === "ally" || t === "all";
+}
+
+/**
+ * Ground / barrier range metric shared by highlight and live.
+ *
+ * Non-diagonal: Manhattan (|dx|+|dy| <= range).
+ * Diagonal: Chebyshev (max(|dx|,|dy|) <= range) — the highlight loop
+ * already walked a Chebyshev box; live used to skip the Manhattan
+ * check and then apply no cap, so a far tile could execute.
+ */
+export function groundTileInRange(
+  dx: number,
+  dy: number,
+  range: number,
+  diagonal?: boolean,
+): boolean {
+  const adx = Math.abs(dx);
+  const ady = Math.abs(dy);
+  if (diagonal) return Math.max(adx, ady) <= range;
+  return adx + ady <= range;
+}
+
+/** Chebyshev distance shared by highlight, live, Attack Nearest, and AoE. */
+export function chebyshevOnBoard(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+}
+
+/**
+ * `hitsMultiple` victim radius is spell range from the clicked tile
+ * (same helper as the blue ring), not preview `areaRadius`. Changing
+ * that would rebalance Frost Nova / Lifesteal Nova.
+ */
+export function hitsMultipleIncludesOccupant(
+  occupant: { x: number; y: number },
+  click: { x: number; y: number },
+  radius: number,
+): boolean {
+  return chebyshevOnBoard(occupant, click) <= radius;
+}
+
+/**
+ * `hitsAllies` measures Chebyshev from the clicked tile to the player,
+ * not player-to-self. Same radius as {@link hitsMultipleIncludesOccupant}.
+ */
+export function hitsAlliesIncludesPlayer(
+  spell: { hitsAllies?: boolean; hitsMultiple?: boolean },
+  playerPos: { x: number; y: number },
+  clickPos: { x: number; y: number },
+  radius: number,
+): boolean {
+  if (spell.hitsAllies !== true || spell.hitsMultiple !== true) return false;
+  return hitsMultipleIncludesOccupant(playerPos, clickPos, radius);
 }
 
 type LoSCell = { x: number; y: number };
@@ -240,13 +369,25 @@ export interface CasterPosition {
   y: number;
 }
 
+export function isCasterTile(
+  caster: CasterPosition,
+  tile: { x: number; y: number },
+): boolean {
+  return tile.x === caster.x && tile.y === caster.y;
+}
+
 /**
  * Compute the set of `"x,y"` tile keys that the given spell can target from
  * `casterPos` on the supplied grid.
  *
- * Returns an empty Set for `self`/`all`/`ground`/`area`/`enemy` spells when
- * no tiles qualify. The caller (wrapper) is responsible for cache + the
- * pacifist-flag side-effect; this function only does the geometric work.
+ * Highlight is the live-ok set — the same {@link isTileCastableLive} gate
+ * mouse / sprite / touch / Attack Nearest / summon-kit clicks use. A
+ * painted tile is therefore executable, and an illegal tile cannot
+ * execute. Geometry (Manhattan ground, Chebyshev enemy/area, line rays,
+ * LoS, minRange, freeCells) lives only in the live helper.
+ *
+ * The caller (wrapper) is responsible for cache only;
+ * this function does geometric work and must not touch Pacifist state.
  */
 export function computeTargetableTiles(
   spell: SpellConfig,
@@ -255,194 +396,24 @@ export function computeTargetableTiles(
 ): Set<string> {
   const { tiles, enemies, worldGridSize, effectiveRange, barrierTiles } =
     gridState;
-  const targetType = (spell.targetType ?? "enemy") as string;
-  const range = effectiveRange;
-  const minR = spell.minRange ?? 1;
-
-  // ── Self-targeting spells (heals, buffs, shields) only highlight the caster tile
-  if (targetType === "self") {
-    return new Set([`${casterPos.x},${casterPos.y}`]);
-  }
-
-  // ── Ally-targeting spells (Shield/Iron Skin/Haste/Enrage): self tile + allied
-  // summon tiles within range. Allied summons are enemies with isSummon=true and
-  // side='player'. ADDITIVE branch — does not affect existing branches.
-  if (targetType === "ally") {
-    const out = new Set<string>();
-    out.add(`${casterPos.x},${casterPos.y}`);
-    for (const e of enemies) {
-      if (!e.isSummon || e.side !== "player" || e.hp <= 0) continue;
-      const dx = Math.abs(e.x - casterPos.x);
-      const dy = Math.abs(e.y - casterPos.y);
-      if (Math.max(dx, dy) <= range) {
-        out.add(`${e.x},${e.y}`);
-      }
-    }
-    return out;
-  }
-
-  // "all" spells affect every non-wall tile on the map
-  if (targetType === "all") {
-    const allTiles = new Set<string>();
-    for (let y = 0; y < worldGridSize; y++) {
-      for (let x = 0; x < worldGridSize; x++) {
-        if (tiles[y][x] !== "wall") {
-          allTiles.add(`${x},${y}`);
-        }
-      }
-    }
-    return allTiles;
-  }
-
   const out = new Set<string>();
-
-  const hasLoS = (tx: number, ty: number): boolean =>
-    hasBresenhamLoS(casterPos.x, casterPos.y, tx, ty, tiles, barrierTiles);
-
-  // ── Ground / barrier branch: MANHATTAN distance ─────────────────────────────
-  if (targetType === "ground" || spell.isBarrier) {
-    const occupied = new Set<string>();
-    for (const e of enemies) occupied.add(`${e.x},${e.y}`);
-    occupied.add(`${casterPos.x},${casterPos.y}`);
-    for (let dx = -range; dx <= range; dx++) {
-      for (let dy = -range; dy <= range; dy++) {
-        const nx = casterPos.x + dx;
-        const ny = casterPos.y + dy;
-        if (nx < 0 || ny < 0 || nx >= worldGridSize || ny >= worldGridSize)
-          continue;
-        if (Math.abs(dx) + Math.abs(dy) > range && !spell.diagonal) continue;
-        if (barrierTiles.has(`${nx},${ny}`)) continue;
-        const key = `${nx},${ny}`;
-        if (!occupied.has(key) && tiles[ny]?.[nx] !== "wall") {
-          // LoS: ground/barrier spells with truthy spell.lineOfSight require
-          // an unobstructed ray from caster to target. Spells with falsy
-          // spell.lineOfSight (e.g. Barrier, which has no lineOfSight field)
-          // bypass this and keep placing on any in-range free tile.
-          if (playerSpellRequiresLos(spell) && !hasLoS(nx, ny)) continue;
-          out.add(key);
-        }
+  const size = Math.max(0, Math.floor(Number(worldGridSize) || 0));
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const live = isTileCastableLive(
+        spell,
+        casterPos,
+        { x, y },
+        enemies,
+        tiles,
+        effectiveRange,
+        barrierTiles,
+      );
+      if (shouldExecuteLiveCast(live)) {
+        out.add(`${x},${y}`);
       }
     }
-    return out;
   }
-
-  // ── Line branch: tiles in a straight line from caster up to range using
-  // Bresenham LoS. Walks every cell the ray passes through; stops at walls,
-  // barriers, or grid bounds. ADDITIVE — does not affect existing branches.
-  if (targetType === "line") {
-    const out = new Set<string>();
-    // Cast rays in all 8 directions (cardinal + diagonal) up to `range` tiles.
-    const dirs = [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-      [1, 1],
-      [1, -1],
-      [-1, 1],
-      [-1, -1],
-    ];
-    for (const [dx, dy] of dirs) {
-      for (let step = 1; step <= range; step++) {
-        const nx = casterPos.x + dx * step;
-        const ny = casterPos.y + dy * step;
-        if (nx < 0 || ny < 0 || nx >= worldGridSize || ny >= worldGridSize)
-          break;
-        if (tiles[ny]?.[nx] === "wall") break;
-        if (barrierTiles.has(`${nx},${ny}`)) break;
-        // LoS: line spells with truthy spell.lineOfSight require an
-        // unobstructed ray. The ray-walk break above already stops at walls
-        // and barriers, so hasLoS is satisfied for any tile reached; this
-        // explicit guard keeps the line branch consistent with the
-        // enemy/area/ground branches. Spells with falsy spell.lineOfSight
-        // bypass it.
-        if (playerSpellRequiresLos(spell) && !hasLoS(nx, ny)) break;
-        if (step < minR) continue;
-        out.add(`${nx},${ny}`);
-      }
-    }
-    return out;
-  }
-
-  // ── Chain branch: single-target castability (same shape as 'enemy', no area
-  // expansion). Bounces are handled in castHelpers, not targeting. ADDITIVE.
-  if (targetType === "chain") {
-    const out = new Set<string>();
-    for (let dy = -range; dy <= range; dy++) {
-      for (let dx = -range; dx <= range; dx++) {
-        const chebyshev = Math.max(Math.abs(dx), Math.abs(dy));
-        if (chebyshev > range) continue;
-        if (chebyshev < minR) continue;
-        if (dx === 0 && dy === 0) continue;
-        const nx = casterPos.x + dx;
-        const ny = casterPos.y + dy;
-        if (nx < 0 || nx >= worldGridSize || ny < 0 || ny >= worldGridSize)
-          continue;
-        if (tiles[ny][nx] === "wall") continue;
-        if (barrierTiles.has(`${nx},${ny}`)) continue;
-        if (playerSpellRequiresLos(spell) && !hasLoS(nx, ny)) continue;
-        out.add(`${nx},${ny}`);
-      }
-    }
-    return out;
-  }
-
-  // ── Area / enemy branch: CHEBYSHEV distance ─────────────────────────────────
-  const areaRadius = spell.areaRadius ?? 0;
-  const targetTiles = new Set<string>();
-  for (let dy = -range; dy <= range; dy++) {
-    for (let dx = -range; dx <= range; dx++) {
-      const chebyshev = Math.max(Math.abs(dx), Math.abs(dy));
-      if (chebyshev > range) continue;
-      if (chebyshev < minR) continue;
-      if (dx === 0 && dy === 0) continue;
-      const nx = casterPos.x + dx;
-      const ny = casterPos.y + dy;
-      if (nx < 0 || nx >= worldGridSize || ny < 0 || ny >= worldGridSize)
-        continue;
-      if (tiles[ny][nx] === "wall") continue;
-
-      // Linear: only cardinal directions (dx=0 or dy=0)
-      if (spell.linear && dx !== 0 && dy !== 0) continue;
-      // Diagonal: only diagonal lines (|dx|===|dy|)
-      if (spell.diagonal && Math.abs(dx) !== Math.abs(dy)) continue;
-      // Free cells: skip tiles occupied by enemies or player
-      if (spell.freeCells) {
-        const occupied =
-          enemies.some((e) => e.x === nx && e.y === ny) ||
-          (nx === casterPos.x && ny === casterPos.y);
-        if (occupied) continue;
-      }
-      // Line of sight check
-      if (playerSpellRequiresLos(spell) && !hasLoS(nx, ny)) continue;
-
-      // H3: barrier tiles are impassable (treat as walls for LoS and range)
-      if (barrierTiles.has(`${nx},${ny}`)) continue;
-      targetTiles.add(`${nx},${ny}`);
-    }
-  }
-
-  // For area spells, expand each target tile by areaRadius
-  if (targetType === "area" && areaRadius > 0) {
-    for (const key of targetTiles) {
-      const [tx, ty] = key.split(",").map(Number);
-      for (let dy = -areaRadius; dy <= areaRadius; dy++) {
-        for (let dx = -areaRadius; dx <= areaRadius; dx++) {
-          const chebyshev = Math.max(Math.abs(dx), Math.abs(dy));
-          if (chebyshev > areaRadius) continue;
-          const nx = tx + dx;
-          const ny = ty + dy;
-          if (nx < 0 || nx >= worldGridSize || ny < 0 || ny >= worldGridSize)
-            continue;
-          if (tiles[ny][nx] === "wall") continue;
-          out.add(`${nx},${ny}`);
-        }
-      }
-    }
-  } else {
-    for (const key of targetTiles) out.add(key);
-  }
-
   return out;
 }
 
@@ -542,14 +513,23 @@ export function isTileCastableLive(
     return { ok: true, reason: "all" };
   }
 
+  // Area footprint can include the caster cell; mouse/touch execute
+  // already refused that click. Reject here so highlight, live, and
+  // Attack Nearest share one rule (self / ally / all only).
+  if (
+    isCasterTile(casterPos, tile) &&
+    !playerSpellAllowsCasterTile(spell) &&
+    (targetType === "area" || targetType === "enemy" || targetType === "chain")
+  ) {
+    return { ok: false, reason: "caster_tile_hostile" };
+  }
+
   // ── ally: caster tile OR a player-side summon within Chebyshev range.
   if (targetType === "ally") {
     if (tx === casterPos.x && ty === casterPos.y) {
       return { ok: true, reason: "ally_self" };
     }
-    const dx = Math.abs(tx - casterPos.x);
-    const dy = Math.abs(ty - casterPos.y);
-    if (Math.max(dx, dy) > range) {
+    if (chebyshevOnBoard(casterPos, tile) > range) {
       return { ok: false, reason: "ally_out_of_range" };
     }
     const ally = liveCombatants.find(
@@ -571,7 +551,7 @@ export function isTileCastableLive(
   if (targetType === "ground" || spell.isBarrier) {
     const dx = Math.abs(tx - casterPos.x);
     const dy = Math.abs(ty - casterPos.y);
-    if (Math.abs(dx) + Math.abs(dy) > range && !spell.diagonal) {
+    if (!groundTileInRange(dx, dy, range, spell.diagonal)) {
       return { ok: false, reason: "ground_out_of_range" };
     }
     if (barriers?.has(destKey)) {
@@ -608,7 +588,7 @@ export function isTileCastableLive(
     }
     const stepX = ddx === 0 ? 0 : ddx > 0 ? 1 : -1;
     const stepY = ddy === 0 ? 0 : ddy > 0 ? 1 : -1;
-    const cheb = Math.max(Math.abs(ddx), Math.abs(ddy));
+    const cheb = chebyshevOnBoard(casterPos, tile);
     if (cheb > range) return { ok: false, reason: "line_out_of_range" };
     if (cheb < minR) return { ok: false, reason: "line_below_min_range" };
     let cx = casterPos.x;
@@ -646,7 +626,7 @@ export function isTileCastableLive(
   }
   const dx = tx - casterPos.x;
   const dy = ty - casterPos.y;
-  const chebyshev = Math.max(Math.abs(dx), Math.abs(dy));
+  const chebyshev = chebyshevOnBoard(casterPos, tile);
 
   const destBarrier = barrierTiles.has(`${tx},${ty}`);
   const destOccupied =
@@ -718,7 +698,7 @@ export function isTileCastableLive(
     }
     for (let ay = -range; ay <= range; ay++) {
       for (let ax = -range; ax <= range; ax++) {
-        const aCheb = Math.max(Math.abs(ax), Math.abs(ay));
+        const aCheb = chebyshevOnBoard({ x: 0, y: 0 }, { x: ax, y: ay });
         if (aCheb > range) continue;
         if (aCheb < minR) continue;
         if (ax === 0 && ay === 0) continue;
@@ -738,9 +718,7 @@ export function isTileCastableLive(
         }
         if (playerSpellRequiresLos(spell) && !hasLoS(axN, ayN)) continue;
         // Is the clicked tile within areaRadius of this anchor?
-        const tdx = Math.abs(tx - axN);
-        const tdy = Math.abs(ty - ayN);
-        if (Math.max(tdx, tdy) <= areaRadius) {
+        if (chebyshevOnBoard(tile, { x: axN, y: ayN }) <= areaRadius) {
           return { ok: true, reason: "area_expansion" };
         }
       }
@@ -791,7 +769,7 @@ export function attackNearestLiveCasterPos(
 export function spellHighlightRangeBase(
   spell: Pick<SpellConfig, "maxRange" | "range">,
 ): number {
-  return spell.maxRange ?? Math.max(1, Number(spell.range));
+  return spellRangeBase(spell);
 }
 
 /**
@@ -800,7 +778,6 @@ export function spellHighlightRangeBase(
  * minRange / linear) used to pick a closer blocked tile — or miss a
  * farther highlighted one — so Attack Nearest and the blue ring disagreed.
  */
-
 export function playerSpellEffectiveRange(
   spell: SpellConfig,
   getEffectiveSpellRange: (baseRange: number, spellId?: string) => number,
@@ -834,16 +811,65 @@ export function pickNearestLiveHostileTile(
       barrierTiles,
     );
     if (!shouldExecuteLiveCast(live)) continue;
-    const dist = Math.max(
-      Math.abs(tile.x - caster.x),
-      Math.abs(tile.y - caster.y),
-    );
+    const dist = chebyshevOnBoard(tile, caster);
     if (dist < nearestDist) {
       nearest = tile;
       nearestDist = dist;
     }
   }
   return nearest;
+}
+
+/**
+ * Attack Nearest / keyboard S must land on the highlighted caster tile
+ * for every `self` / `ally` spell, not only Blood Mend (`effectType ===
+ * "heal"`). Timestep, Mirror, and Shield paint that tile but the button
+ * used to search hostiles, so a legal highlighted target could not
+ * execute. `all` still prefers the nearest live hostile.
+ */
+export function attackNearestResolvesOnCasterTile(spell: {
+  targetType?: string;
+}): boolean {
+  const t = (spell.targetType ?? "enemy") as string;
+  return t === "self" || t === "ally";
+}
+
+/**
+ * Single Attack Nearest pick: caster tile for self/ally (live gate),
+ * else nearest live-ok hostile. Button enable and execute must share this.
+ */
+export function pickAttackNearestTile(
+  spell: SpellConfig,
+  caster: CasterPosition,
+  liveCombatants: Enemy[],
+  mapTiles: TileType[][],
+  effectiveRange: number,
+  barrierTiles: BarrierTiles = EMPTY_BARRIER_TILES,
+  hostiles?: ReadonlyArray<{ x: number; y: number }>,
+): { x: number; y: number } | null {
+  if (attackNearestResolvesOnCasterTile(spell)) {
+    const tile = { x: caster.x, y: caster.y };
+    const live = isTileCastableLive(
+      spell,
+      caster,
+      tile,
+      liveCombatants,
+      mapTiles,
+      effectiveRange,
+      barrierTiles,
+    );
+    return shouldExecuteLiveCast(live) ? tile : null;
+  }
+  const search = hostiles ?? liveHostilesForAttackNearest(liveCombatants);
+  return pickNearestLiveHostileTile(
+    spell,
+    caster,
+    search,
+    liveCombatants,
+    mapTiles,
+    effectiveRange,
+    barrierTiles,
+  );
 }
 
 /** Attack Nearest button: same legal set as the live execute path. */
@@ -856,28 +882,15 @@ export function canAttackNearestLive(
   effectiveRange: number,
   barrierTiles: BarrierTiles = EMPTY_BARRIER_TILES,
 ): boolean {
-  if (spell.targetType === "self" && spell.effectType === "heal") {
-    return shouldExecuteLiveCast(
-      isTileCastableLive(
-        spell,
-        caster,
-        { x: caster.x, y: caster.y },
-        liveCombatants,
-        mapTiles,
-        effectiveRange,
-        barrierTiles,
-      ),
-    );
-  }
   return (
-    pickNearestLiveHostileTile(
+    pickAttackNearestTile(
       spell,
       caster,
-      hostiles,
       liveCombatants,
       mapTiles,
       effectiveRange,
       barrierTiles,
+      hostiles,
     ) != null
   );
 }
@@ -941,6 +954,95 @@ export function shouldBypassHighlightForLiveHostile(
   return occupantIsLiveHostile && shouldExecuteLiveCast(live);
 }
 
+export type TileCastClickDecision =
+  | { action: "execute"; bypassHighlight: boolean }
+  | { action: "reject"; reason: string };
+
+/**
+ * Mouse and touch tile-clicks share this decision so highlight membership
+ * and the live gate cannot fork per input device.
+ *
+ * Living hostiles: live geometry only (the documented cache-bypass). Empty /
+ * ally / ground / area tiles still require the painted set, then the live
+ * re-check so a stale highlighted cell cannot execute.
+ */
+export function decideTileCastClick(args: {
+  live: TileCastableResult;
+  tileHighlighted: boolean;
+  occupantIsLiveHostile: boolean;
+}): TileCastClickDecision {
+  if (args.occupantIsLiveHostile) {
+    if (shouldExecuteLiveCast(args.live)) {
+      return { action: "execute", bypassHighlight: true };
+    }
+    return { action: "reject", reason: args.live.reason };
+  }
+  if (!args.tileHighlighted) {
+    return { action: "reject", reason: "out_of_range" };
+  }
+  if (!shouldExecuteLiveCast(args.live)) {
+    return { action: "reject", reason: args.live.reason };
+  }
+  return { action: "execute", bypassHighlight: false };
+}
+
+export type SpriteCastClickDecision =
+  | {
+      action: "execute";
+      source: "sprite-enemy" | "sprite-basic" | "sprite-player";
+    }
+  | { action: "reject_live" }
+  | { action: "wait_for_turn" }
+  | { action: "inspect" }
+  | { action: "fallthrough" };
+
+/**
+ * Mouse and touch sprite-first hits share this table so a highlighted
+ * (live-ok) entity is executable and an illegal one cannot execute.
+ * Tile clicks stay on {@link decideTileCastClick}.
+ */
+export function decideSpriteCastClick(args: {
+  selectedSpellId: string | null | undefined;
+  hasSelectedSpell: boolean;
+  hitKind: string;
+  playerCastOk: boolean;
+  inBattle: boolean;
+  liveOk: boolean;
+  selfOrAllySpell: boolean;
+  hasBasicAttack: boolean;
+}): SpriteCastClickDecision {
+  const selected = Boolean(args.selectedSpellId);
+  if (selected && args.hitKind === "enemy" && args.playerCastOk) {
+    if (!args.hasSelectedSpell) return { action: "fallthrough" };
+    return args.liveOk
+      ? { action: "execute", source: "sprite-enemy" }
+      : { action: "reject_live" };
+  }
+  if (selected && args.hitKind === "enemy" && args.inBattle) {
+    return { action: "wait_for_turn" };
+  }
+  if (!selected && args.hitKind === "summon") {
+    return { action: "inspect" };
+  }
+  if (!selected && args.hitKind === "enemy") {
+    if (args.hasBasicAttack && args.liveOk && args.playerCastOk) {
+      return { action: "execute", source: "sprite-basic" };
+    }
+    return { action: "inspect" };
+  }
+  if (selected && args.hitKind === "player" && args.selfOrAllySpell) {
+    if (!args.playerCastOk) {
+      return args.inBattle
+        ? { action: "wait_for_turn" }
+        : { action: "fallthrough" };
+    }
+    return args.liveOk
+      ? { action: "execute", source: "sprite-player" }
+      : { action: "reject_live" };
+  }
+  return { action: "fallthrough" };
+}
+
 /** Execute path: live store + hostility filter + highlight live gate. */
 export function pickNearestAttackableHostile(
   spell: SpellConfig,
@@ -950,10 +1052,9 @@ export function pickNearestAttackableHostile(
   effectiveRange: number,
   barrierTiles: BarrierTiles = EMPTY_BARRIER_TILES,
 ): { x: number; y: number } | null {
-  return pickNearestLiveHostileTile(
+  return pickAttackNearestTile(
     spell,
     caster,
-    liveHostilesForAttackNearest(liveCombatants),
     liveCombatants,
     mapTiles,
     effectiveRange,
@@ -970,13 +1071,129 @@ export function canAttackNearestAgainstLive(
   effectiveRange: number,
   barrierTiles: BarrierTiles = EMPTY_BARRIER_TILES,
 ): boolean {
-  return canAttackNearestLive(
+  return (
+    pickNearestAttackableHostile(
+      spell,
+      caster,
+      liveCombatants,
+      mapTiles,
+      effectiveRange,
+      barrierTiles,
+    ) != null
+  );
+}
+
+/**
+ * Attack Nearest / execute AP preview. Arcane Surge and other
+ * `applyApCost` modifiers must run here — raw `spell.apCost` let the
+ * button light up when executeCastAttempt still rejected.
+ */
+/**
+ * Single AP debit used by Attack Nearest preview and execute.
+ * {@link planPlayerCastResources} must call this so Arcane Surge cannot
+ * light the button with a different cost than `executeCastAttempt`.
+ */
+export function resolveCastApCost(
+  baseCost: number,
+  applyApCost: (base: number) => number = (base) => base,
+): number {
+  return applyApCost(Math.max(0, Math.floor(Number(baseCost) || 0)));
+}
+
+export function canAffordCastAp(
+  currentAp: number,
+  baseCost: number,
+  applyApCost: (base: number) => number = (base) => base,
+): boolean {
+  const have = Math.max(0, Math.floor(Number(currentAp) || 0));
+  return have >= resolveCastApCost(baseCost, applyApCost);
+}
+
+/**
+ * Attack Nearest pick used by tests and the execute path.
+ * Self / heal lands on the caster tile (the player tile Attack Nearest
+ * already resolved via {@link attackNearestLiveCasterPos}).
+ */
+export function findAttackNearestTarget(
+  spell: SpellConfig,
+  caster: CasterPosition,
+  hostiles: ReadonlyArray<{ x: number; y: number }>,
+  mapTiles: TileType[][],
+  effectiveRange: number,
+  barrierTiles: BarrierTiles = EMPTY_BARRIER_TILES,
+): { x: number; y: number } | null {
+  return pickAttackNearestTile(
     spell,
     caster,
-    liveHostilesForAttackNearest(liveCombatants),
-    liveCombatants,
+    hostiles as Enemy[],
     mapTiles,
     effectiveRange,
     barrierTiles,
+    hostiles,
   );
+}
+
+export interface HighlightLiveMismatch {
+  highlightOnly: string[];
+  liveOnly: string[];
+}
+
+/**
+ * Full-board scan: every highlighted tile must be live-ok, and every
+ * live-ok tile must be highlighted. Used by parity tests so a painted
+ * legal target is executable and an illegal target cannot execute.
+ */
+export function collectHighlightLiveMismatches(
+  spell: SpellConfig,
+  caster: CasterPosition,
+  grid: TargetGridState,
+): HighlightLiveMismatch;
+export function collectHighlightLiveMismatches(
+  spell: SpellConfig,
+  caster: CasterPosition,
+  enemies: Enemy[],
+  tiles: TileType[][],
+  effectiveRange: number,
+  barrierTiles?: BarrierTiles,
+): HighlightLiveMismatch;
+export function collectHighlightLiveMismatches(
+  spell: SpellConfig,
+  caster: CasterPosition,
+  gridOrEnemies: TargetGridState | Enemy[],
+  tiles?: TileType[][],
+  effectiveRange?: number,
+  barrierTiles?: BarrierTiles,
+): HighlightLiveMismatch {
+  const grid: TargetGridState = Array.isArray(gridOrEnemies)
+    ? {
+        tiles: tiles ?? [],
+        enemies: gridOrEnemies,
+        worldGridSize: tiles?.length ?? 0,
+        effectiveRange: effectiveRange ?? spellRangeBase(spell),
+        barrierTiles: barrierTiles ?? EMPTY_BARRIER_TILES,
+      }
+    : gridOrEnemies;
+  const highlighted = computeTargetableTiles(spell, caster, grid);
+  const highlightOnly: string[] = [];
+  const liveOnly: string[] = [];
+  const size = grid.worldGridSize;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const key = `${x},${y}`;
+      const live = isTileCastableLive(
+        spell,
+        caster,
+        { x, y },
+        grid.enemies,
+        grid.tiles,
+        grid.effectiveRange,
+        grid.barrierTiles,
+      );
+      const hi = highlighted.has(key);
+      const ok = shouldExecuteLiveCast(live);
+      if (hi && !ok) highlightOnly.push(key);
+      if (ok && !hi) liveOnly.push(key);
+    }
+  }
+  return { highlightOnly, liveOnly };
 }

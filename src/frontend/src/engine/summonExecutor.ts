@@ -28,7 +28,8 @@ import type { EnemyAction } from "./enemyAI";
 import {
   type OccupancyContext,
   isCellFree,
-  relocateOffMandatoryCells,
+  occupancyVacating,
+  resolveProgressionSafeOccupantCell,
 } from "./occupancy.ts";
 import type { SpellContext } from "./spellEngine.ts";
 
@@ -52,7 +53,7 @@ export interface SummonExecutorHelpers {
   occupancyCtx: OccupancyContext;
   /** World grid size for clamping. */
   worldGridSize: number;
-  /** MP cost per tile of Chebyshev movement. */
+  /** MP cost per tile of Chebyshev movement (Slime/Frozen doublers). */
   mpCostPerTile: number;
   /** AP cost for a melee action. */
   meleeApCost: number;
@@ -129,23 +130,20 @@ export function executeSummonAction(
       );
       return;
     }
+    const origin = { x, y };
     x = clamped.x;
     y = clamped.y;
     currentMp -= mpCost;
-    const reserved = helpers.occupancyCtx.reserved;
-    if (reserved?.has(`${x},${y}`)) {
-      const [slid] = relocateOffMandatoryCells(
-        [{ x, y }],
-        reserved,
-        helpers.occupancyCtx,
+    // Live WX occupancy still reports the pre-move tile until the store
+    // commits. Unseal must not keep that ghost or a dual-path cut never opens.
+    const vacated = occupancyVacating(helpers.occupancyCtx, origin);
+    const landed = resolveProgressionSafeOccupantCell({ x, y }, vacated);
+    if (landed.x !== x || landed.y !== y) {
+      logLines.push(
+        `[move] ${summonLabel} slid off sealed cut (${x},${y}) → (${landed.x},${landed.y})`,
       );
-      if (slid.x !== x || slid.y !== y) {
-        logLines.push(
-          `[move] ${summonLabel} slid off unique bridge (${x},${y}) → (${slid.x},${slid.y})`,
-        );
-        x = slid.x;
-        y = slid.y;
-      }
+      x = landed.x;
+      y = landed.y;
     }
     logLines.push(`[move] ${summonLabel} → (${x},${y}) spent ${mpCost}MP`);
   };

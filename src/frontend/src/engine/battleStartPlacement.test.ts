@@ -186,4 +186,78 @@ describe("findBattleStartCell", () => {
     assert.notDeepEqual(enemy, { x: 8, y: 8 });
     assert.ok(chebyshev(enemy, player) >= 3);
   });
+
+  it("does not teleport max-spacing onto a leftover island", () => {
+    const main: { x: number; y: number }[] = [];
+    for (let x = 6; x <= 10; x++) {
+      for (let y = 6; y <= 10; y++) main.push({ x, y });
+    }
+    const walkable = [...main, { x: 0, y: 0 }, { x: 1, y: 0 }];
+    const occupied = new Set(["8,8"]);
+    const cell = findBattleStartCell(
+      { x: 8, y: 8 },
+      [{ x: 8, y: 8, minDist: 3 }],
+      3,
+      island(walkable, occupied),
+    );
+    assert.ok(cell);
+    assert.notEqual(occKey(cell.x, cell.y), "0,0");
+    assert.notEqual(occKey(cell.x, cell.y), "1,0");
+    assert.ok(cell.x >= 6 && cell.x <= 10 && cell.y >= 6 && cell.y <= 10);
+  });
+
+  it("does not teleport max-spacing across a portal cut-vertex", () => {
+    // Main 5×5 room at (6,6)–(10,10), portal at (3,8), far island (0,8)–(1,8).
+    // Overworld can walk through the portal; battle cannot. Max-spacing from
+    // (8,8) used to land on (0,8) because floodOriginComponent treated the
+    // portal tile as floor.
+    const main: { x: number; y: number }[] = [];
+    for (let x = 6; x <= 10; x++) {
+      for (let y = 6; y <= 10; y++) main.push({ x, y });
+    }
+    const walkable = [
+      ...main,
+      { x: 4, y: 8 },
+      { x: 5, y: 8 },
+      { x: 3, y: 8 },
+      { x: 2, y: 8 },
+      { x: 1, y: 8 },
+      { x: 0, y: 8 },
+    ];
+    const occupied = new Set(["8,8"]);
+    const cell = findBattleStartCell(
+      { x: 8, y: 8 },
+      [{ x: 8, y: 8, minDist: 3 }],
+      3,
+      island(walkable, occupied, { portals: new Set(["3,8"]) }),
+    );
+    assert.ok(cell);
+    assert.notEqual(occKey(cell.x, cell.y), "0,8");
+    assert.notEqual(occKey(cell.x, cell.y), "1,8");
+    assert.notEqual(occKey(cell.x, cell.y), "2,8");
+    assert.ok(
+      (cell.x >= 4 && cell.x <= 10 && cell.y >= 6 && cell.y <= 10) ||
+        (cell.x === 5 && cell.y === 8) ||
+        (cell.x === 4 && cell.y === 8),
+    );
+  });
+
+  it("seed-long-corridor-fallback: pass 2 reaches beyond radius 2", () => {
+    // 16-wide unique corridor; origin occupied at the far end. Pass 2 used
+    // minDistFallback=2 and returned null, so WX's unfiltered ring-scan
+    // could leave the unit stacked.
+    const walkable: { x: number; y: number }[] = [];
+    for (let x = 0; x < WORLD_GRID_SIZE; x++) walkable.push({ x, y: 0 });
+    const occupied = new Set(["15,0"]);
+    const cell = findBattleStartCell(
+      { x: 15, y: 0 },
+      [{ x: 15, y: 0, minDist: 3 }],
+      2,
+      island(walkable, occupied),
+    );
+    assert.ok(cell);
+    assert.notEqual(occKey(cell.x, cell.y), "15,0");
+    assert.equal(cell.y, 0);
+    assert.equal(cell.x >= 0 && cell.x < WORLD_GRID_SIZE, true);
+  });
 });

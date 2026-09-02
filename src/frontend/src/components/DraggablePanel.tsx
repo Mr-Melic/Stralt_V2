@@ -612,86 +612,80 @@ const DraggablePanel: React.FC<DraggablePanelProps> = ({
     };
   }, [clampPosition]);
 
-  const onMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    dragState.current.startMouseX = e.clientX;
-    dragState.current.startMouseY = e.clientY;
-    dragState.current.startPanelX = currentPosRef.current.x;
-    dragState.current.startPanelY = currentPosRef.current.y;
-    dragState.current.active = true;
-    setIsDragging(true);
-    // [UI-SNAP] diagnostic: log every registered snap target at drag start so
-    // we can verify panel-to-panel registration is live (not just the bar).
-    // eslint-disable-next-line no-console
-    console.log(
-      "[UI-SNAP] targets=",
-      Object.keys(panelRegistry),
-      "rects=",
-      JSON.stringify(panelRegistry),
-    );
+  const clampPositionRef = useRef(clampPosition);
+  clampPositionRef.current = clampPosition;
+  const scheduleSaveRef = useRef(scheduleSave);
+  scheduleSaveRef.current = scheduleSave;
+
+  const dragRafRef = useRef<number | null>(null);
+  const pendingDragRef = useRef<{
+    pos: { x: number; y: number };
+    preview: { x: number; y: number } | null;
+    size: { w: number; h: number } | null;
+  } | null>(null);
+  const detachDragListenersRef = useRef<(() => void) | null>(null);
+
+  const flushPendingDrag = useCallback(() => {
+    dragRafRef.current = null;
+    const pending = pendingDragRef.current;
+    if (!pending) return;
+    currentPosRef.current = pending.pos;
+    setPosition(pending.pos);
+    setSnapPreview(pending.preview);
+    if (pending.size) setPanelSize(pending.size);
   }, []);
 
-  const onTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    const touch = e.touches[0];
-    dragState.current.startMouseX = touch.clientX;
-    dragState.current.startMouseY = touch.clientY;
-    dragState.current.startPanelX = currentPosRef.current.x;
-    dragState.current.startPanelY = currentPosRef.current.y;
-    dragState.current.active = true;
-    setIsDragging(true);
-    // [UI-SNAP] diagnostic (touch path): same registration snapshot as mouse.
-    // eslint-disable-next-line no-console
-    console.log(
-      "[UI-SNAP] targets=",
-      Object.keys(panelRegistry),
-      "rects=",
-      JSON.stringify(panelRegistry),
-    );
+  const detachDragListeners = useCallback(() => {
+    detachDragListenersRef.current?.();
+    detachDragListenersRef.current = null;
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: panelId is a stable string prop
-  useEffect(() => {
+  const attachDragListeners = useCallback(() => {
+    if (detachDragListenersRef.current) return;
+
     const onMove = (clientX: number, clientY: number) => {
       if (!dragState.current.active) return;
+      const clamp = clampPositionRef.current;
       const dx = clientX - dragState.current.startMouseX;
       const dy = clientY - dragState.current.startMouseY;
       const rawX = dragState.current.startPanelX + dx;
       const rawY = dragState.current.startPanelY + dy;
-      const clamped = clampPosition(rawX, rawY);
+      const clamped = clamp(rawX, rawY);
 
-      // ── LIVE SNAP PREVIEW ─────────────────────────────────────────────────
-      // While dragging, check whether the panel is within SNAP_THRESHOLD of a
-      // snap target (another panel edge or an alignment edge). If so, render a
-      // ghost rectangle at the snap target and ease the actual position toward
-      // it (~40% per move event) so the panel visibly drifts toward its snap
-      // spot — not snapping fully until release, but giving clear visual
-      // feedback. On release, onEnd applies the full snap as before.
+      // Live snap preview: ease toward a nearby target while dragging.
+      // Full snap still applies on release.
       const el = panelRef.current;
       let nextPos = clamped;
       let preview: { x: number; y: number } | null = null;
+      let size: { w: number; h: number } | null = null;
       if (el) {
         const w = el.offsetWidth;
         const h = el.offsetHeight;
-        setPanelSize({ w, h });
+        size = { w, h };
         preview = computeLiveSnapPreview(panelId, clamped, w, h);
         if (preview) {
-          // Lerp ~40% toward the snap target each move event for a smooth drift.
           const LERP = 0.4;
           const easedX = clamped.x + (preview.x - clamped.x) * LERP;
           const easedY = clamped.y + (preview.y - clamped.y) * LERP;
-          nextPos = clampPosition(easedX, easedY);
+          nextPos = clamp(easedX, easedY);
         }
       }
-      currentPosRef.current = nextPos;
-      setPosition(nextPos);
-      setSnapPreview(preview);
+      pendingDragRef.current = { pos: nextPos, preview, size };
+      if (dragRafRef.current === null) {
+        dragRafRef.current = requestAnimationFrame(flushPendingDrag);
+      }
     };
+
     const onEnd = () => {
       if (!dragState.current.active) return;
       dragState.current.active = false;
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
+      flushPendingDrag();
       setIsDragging(false);
       setSnapPreview(null);
-      // Magnetic snap: after release, check proximity to other panels
       const el = panelRef.current;
       if (el) {
         const w = el.offsetWidth;
@@ -702,7 +696,6 @@ const DraggablePanel: React.FC<DraggablePanelProps> = ({
           w,
           h,
         );
-        // Clamp snapped position to screen bounds
         const maxX = Math.max(0, window.innerWidth - w);
         const maxY = Math.max(0, window.innerHeight - h);
         snapped.x = Math.min(Math.max(0, snapped.x), maxX);
@@ -711,26 +704,77 @@ const DraggablePanel: React.FC<DraggablePanelProps> = ({
         lastSnappedPos.current = snapped;
         setPosition(snapped);
       }
-      scheduleSave(currentPosRef.current, currentFoldedRef.current);
+      scheduleSaveRef.current(currentPosRef.current, currentFoldedRef.current);
+      detachDragListeners();
     };
 
     const handleMouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY);
     const handleTouchMove = (e: TouchEvent) => {
       const t = e.touches[0];
-      onMove(t.clientX, t.clientY);
+      if (t) onMove(t.clientX, t.clientY);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", onEnd);
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
     window.addEventListener("touchend", onEnd);
-    return () => {
+    detachDragListenersRef.current = () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", onEnd);
       window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("touchend", onEnd);
     };
-  }, [clampPosition, scheduleSave]);
+  }, [detachDragListeners, flushPendingDrag, panelId]);
+
+  useEffect(() => {
+    return () => {
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
+      detachDragListenersRef.current?.();
+      detachDragListenersRef.current = null;
+    };
+  }, []);
+
+  const beginDrag = useCallback(
+    (clientX: number, clientY: number) => {
+      dragState.current.startMouseX = clientX;
+      dragState.current.startMouseY = clientY;
+      dragState.current.startPanelX = currentPosRef.current.x;
+      dragState.current.startPanelY = currentPosRef.current.y;
+      dragState.current.active = true;
+      setIsDragging(true);
+      attachDragListeners();
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log(
+          "[UI-SNAP] targets=",
+          Object.keys(panelRegistry),
+          "rects=",
+          JSON.stringify(panelRegistry),
+        );
+      }
+    },
+    [attachDragListeners],
+  );
+
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      beginDrag(e.clientX, e.clientY);
+    },
+    [beginDrag],
+  );
+
+  const onTouchStart = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      const touch = e.touches[0];
+      if (!touch) return;
+      beginDrag(touch.clientX, touch.clientY);
+    },
+    [beginDrag],
+  );
 
   const handleFoldToggle = useCallback(() => {
     const next = !currentFoldedRef.current;

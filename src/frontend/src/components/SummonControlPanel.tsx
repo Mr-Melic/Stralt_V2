@@ -275,7 +275,7 @@ export default function SummonControlPanel({
   return (
     <section
       data-ocid="summon_panel.panel"
-      className="flex w-full items-stretch gap-3 border-t-2 border-primary/60 bg-card/95 px-3 py-2 shadow-[0_-4px_14px_rgba(0,0,0,0.55)]"
+      className="fixed inset-x-0 bottom-0 z-[210] flex w-full items-stretch gap-3 border-t-2 border-primary/60 bg-card/95 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-4px_14px_rgba(0,0,0,0.55)]"
       aria-label={`${summonName} control panel`}
     >
       {/* Carved-stone left edge accent */}

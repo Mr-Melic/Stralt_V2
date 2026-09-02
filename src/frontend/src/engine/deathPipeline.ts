@@ -19,7 +19,7 @@
  *     5. Detach from the initiative strip UI.
  *     6. Trigger the shatter VFX at the death position.
  *     7. Log the defeat message.
- *     8. Apply leader-death boost (if the dead combatant was a leader).
+ *     8. Apply leader-death boost (caller must gate on the designated leader).
  *     9. Recheck victory/defeat conditions.
  *    10. Attribute the kill reward.
  *
@@ -55,6 +55,24 @@ export interface DeathPipelineCtx {
   getCombatantName(id: string): string;
   /** Board position of the combatant (must be valid before removal). */
   getCombatantPos(id: string): { x: number; y: number };
+}
+
+/**
+ * Step 8 of {@link processCombatantDeath}. Every roster death calls
+ * `applyLeaderDeathBoost(deadId)`. The designated leader is the
+ * highest-level enemy at battle start (`leaderEnemyIdRef`). A grunt,
+ * enemy minion, or player-side summon must not flip `leaderDiedRef` /
+ * `battleLeaderSlainRef` — that used to enable erratic AI and credit
+ * `leader_slayer` (150 Doka) on the first kill of any fight.
+ */
+export function shouldApplyLeaderDeathBoost(
+  deadId: string,
+  leaderId: string | null | undefined,
+  alreadyApplied = false,
+): boolean {
+  if (alreadyApplied) return false;
+  if (typeof leaderId !== "string" || leaderId.length === 0) return false;
+  return deadId === leaderId;
 }
 
 /**

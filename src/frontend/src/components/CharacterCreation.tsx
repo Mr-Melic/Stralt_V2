@@ -9,6 +9,10 @@ import {
 } from "../data/pieceArt";
 import { useCreateCharacter, useUpdateCharacter } from "../hooks/useQueries";
 import type { Character } from "../types/gameTypes";
+import {
+  championForgeVitalsFromStats,
+  startingChampionStats,
+} from "../utils/startingChampionStats";
 
 interface CharacterCreationProps {
   /** Called with the saved Character on success, or null on cancel */
@@ -51,6 +55,7 @@ const CharacterCreation: React.FC<CharacterCreationProps> = ({
   const updateCharacterMutation = useUpdateCharacter();
 
   const isEditing = !!existingCharacter;
+  const forgeVitals = championForgeVitalsFromStats(existingCharacter?.stats);
 
   // chessPiecePatterns is imported from ../data/pieceArt (single source of truth).
 
@@ -207,21 +212,6 @@ const CharacterCreation: React.FC<CharacterCreationProps> = ({
     setIsReady(true);
   }, [drawPixelCharacter]);
 
-  const generateDefaultStats = () => ({
-    hp: BigInt(100),
-    ap: BigInt(10),
-    mp: BigInt(5),
-    atk: BigInt(15),
-    res: BigInt(10),
-    evasion: BigInt(5),
-    init: BigInt(10),
-    sp: BigInt(8),
-    sr: BigInt(5),
-    resilience: BigInt(8),
-    chc: BigInt(5),
-    killCount: BigInt(0),
-  });
-
   const rotateView = () => {
     const views: ViewDirection[] = ["front", "right", "back", "left"];
     const currentIndex = views.indexOf(currentView);
@@ -279,7 +269,7 @@ const CharacterCreation: React.FC<CharacterCreationProps> = ({
       level: existingCharacter?.level ?? BigInt(1),
       experience: existingCharacter?.experience ?? BigInt(0),
       dokaBalance: existingCharacter?.dokaBalance ?? BigInt(0),
-      stats: existingCharacter?.stats ?? generateDefaultStats(),
+      stats: existingCharacter?.stats ?? startingChampionStats(),
       pixelPattern: JSON.stringify(chessPiecePatterns[selectedPiece]),
       colors: [colors.primary, colors.secondary, colors.accent],
       rotation: BigInt(0),
@@ -735,7 +725,7 @@ const CharacterCreation: React.FC<CharacterCreationProps> = ({
                     border: "1px solid #2a3040",
                     borderRadius: 8,
                     color: "#c0ccd8",
-                    fontSize: 15,
+                    fontSize: 16,
                     fontFamily: "serif",
                     outline: "none",
                     boxSizing: "border-box",
@@ -889,6 +879,62 @@ const CharacterCreation: React.FC<CharacterCreationProps> = ({
                     </span>
                   </div>
                 ))}
+                <div
+                  data-ocid="character_creation.starting_vitals"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    paddingTop: 2,
+                  }}
+                  title={
+                    isEditing
+                      ? "Persisted combat vitals for this champion"
+                      : "Starting combat vitals applied on save"
+                  }
+                >
+                  {(
+                    [
+                      ["HP", forgeVitals.hp, "#e74c3c"],
+                      ["AP", forgeVitals.ap, "#c9a227"],
+                      ["MP", forgeVitals.mp, "#27ae60"],
+                      ["INIT", forgeVitals.init, "#d4a84b"],
+                    ] as const
+                  ).map(([label, value, color]) => (
+                    <div
+                      key={label}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 2,
+                        flex: 1,
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: "#6a7a8a",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {label}
+                      </span>
+                      <span
+                        style={{
+                          color,
+                          fontSize: 13,
+                          fontWeight: 800,
+                          fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                        }}
+                      >
+                        {value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 

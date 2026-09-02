@@ -10,6 +10,11 @@ export type AchievementCreditPersistLock = {
   commit(next: { doka?: number }): void;
   snapshot(): { doka: number };
   isWalletSeeded(): boolean;
+  /**
+   * `#ok` on an unseeded placeholder must not seed at grant-only, but idle
+   * hydrate must not copy the pre-claim query either.
+   */
+  noteUnseededCredit?: () => void;
 };
 
 /**
@@ -125,6 +130,8 @@ export async function creditAchievementRewardThroughPersist(
           parsed.ok,
         ),
       });
+    } else if ("ok" in parsed && parsed.ok > 0) {
+      persist.noteUnseededCredit?.();
     }
     return parsed;
   });

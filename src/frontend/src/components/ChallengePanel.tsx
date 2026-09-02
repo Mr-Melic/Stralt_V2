@@ -4,6 +4,7 @@ import {
   type Challenge,
   type ChallengePanelProgress,
   type ChallengeTier,
+  challengeFailCopy,
   isChallengeCompleted,
   isChallengeFailed,
 } from "../utils/challengeCompletion";
@@ -75,6 +76,8 @@ export default function ChallengePanel({
     py: number;
   } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragRafRef = useRef<number | null>(null);
+  const pendingPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const persistLayout = useCallback(
     (p: { x: number; y: number }, f: boolean) => {
@@ -96,6 +99,10 @@ export default function ChallengePanel({
   useEffect(
     () => () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
     },
     [],
   );
@@ -121,12 +128,29 @@ export default function ChallengePanel({
             dragRef.current.py + ev.clientY - dragRef.current.my,
           ),
         );
-        setPos({ x: nx, y: ny });
+        pendingPosRef.current = { x: nx, y: ny };
+        if (dragRafRef.current === null) {
+          dragRafRef.current = requestAnimationFrame(() => {
+            dragRafRef.current = null;
+            const next = pendingPosRef.current;
+            if (next) setPos(next);
+          });
+        }
       };
       const onUp = () => {
         dragRef.current = null;
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
+        if (dragRafRef.current !== null) {
+          cancelAnimationFrame(dragRafRef.current);
+          dragRafRef.current = null;
+        }
+        const next = pendingPosRef.current;
+        if (next) {
+          setPos(next);
+          persistLayout(next, folded);
+          return;
+        }
         setPos((p) => {
           persistLayout(p, folded);
           return p;
@@ -272,7 +296,9 @@ export default function ChallengePanel({
                 {progress.totalDamage}
               </div>
               {currentChallenge.condition === "direct_hit" && (
-                <div>Direct hit: {progress.directHit ? "Yes" : "No"}</div>
+                <div>
+                  All casts within 2 tiles: {progress.directHit ? "Yes" : "No"}
+                </div>
               )}
               <div
                 style={{
@@ -302,7 +328,11 @@ export default function ChallengePanel({
                     ✗
                   </span>
                 ) : null}
-                {failed ? "Failed!" : onTrack ? "On track!" : "Not met yet"}
+                {failed
+                  ? challengeFailCopy(currentChallenge)
+                  : onTrack
+                    ? "On track!"
+                    : "Not met yet"}
               </div>
             </div>
           )}
