@@ -11,15 +11,26 @@ check-deploy = true
 [canisters.backend]
 main = "src/backend/main.mo"
 
+# `.old/src/backend/dist/backend.most` is Caffeine-owned: it is the stable
+# signature of the last build Caffeine deployed successfully for this project
+# (2026-08-31, PR #181 merge f8aa05e: chain 20260826/27/31, 42 stables, no
+# GameKey). Caffeine keeps its own copy and compares every import against it
+# (`caffeine projects clone` also writes it here), so the file in the repo must
+# be byte-identical to that build's `src/backend/dist/backend.most` — never a
+# blank `actor { };` (PR #177) and never a hand-written guess (PR #311, M0263
+# at import). After the next successful Caffeine deploy, replace it with that
+# build's `.most` and add the same file under
+# src/backend/migrations/snapshots/deployed/. `python3 scripts/check-eop-stables.py`
+# and `bash scripts/caffeine-import-gate.sh backend` check the chain against it
+# and against every other recorded shape under snapshots/.
 [canisters.backend.check-stable]
 path = ".old/src/backend/dist/backend.most"
 
 [canisters.backend.migrations]
 chain = "src/backend/migrations"
-# Include empty-canister genesis (20260826) through the latest pending file so
-# `mops check` / Caffeine import compares an empty previous against OldActor = {}
-# rather than treating 20260827's populated legacy shape as the chain start.
-check-limit = 3
+# Must be >= number of chain files so `mops check` keeps the empty-canister
+# genesis (20260801, OldActor = {}) and a fresh install still compiles (M0263).
+check-limit = 5
 
 [toolchain]
 moc = "1.11.2"

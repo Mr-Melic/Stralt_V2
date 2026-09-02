@@ -69,9 +69,9 @@ const AchievementToast: React.FC<AchievementToastProps> = ({
       onKeyDown={handleKeyDown}
       style={{
         position: "fixed",
-        // sit just below the 44px top bar so it never overlaps the header
-        top: 50,
-        right: 20,
+        // sit just below the live top HUD (44px + notch) so it never overlaps
+        top: "calc(var(--app-top-hud-height) + 6px)",
+        right: "max(20px, env(safe-area-inset-right, 0px))",
         transform: `translateY(${translateY})`,
         opacity,
         transition:

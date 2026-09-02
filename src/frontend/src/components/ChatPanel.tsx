@@ -13,7 +13,7 @@ import {
   Swords,
 } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "../backend.d";
 import {
   type ClickTraceRecord,
@@ -234,6 +234,11 @@ interface ChatPanelProps {
    * existing callers.
    */
   debugContext?: DebugContext;
+  /**
+   * Live debug snapshot written by WorldExploration without React state.
+   * Read at export time so turn/combatant updates do not re-render ChatPanel.
+   */
+  debugContextRef?: React.RefObject<DebugContext | undefined>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -486,6 +491,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   activeEffects = [],
   isPaused = false,
   debugContext,
+  debugContextRef,
 }) => {
   const [isFolded, setIsFolded] = useState(false);
   const [activeChannel, setActiveChannel] = useState<Channel>("general");
@@ -774,32 +780,19 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       .reverse();
   }, [debugEntries, activeCategories, searchQuery]);
 
-  // SECTION 4 (build #329): construct an ExportContext from the debugContext
-  // prop plus live getters for the debug log buffer, click trace buffer, and
-  // geometry snapshot. The getters are invoked at export time, so the snapshot
-  // reflects state at the moment the user clicks Export.
-  //
-  // getGeometrySnapshot requires inputs (combatants, spriteRects, camera, dpr,
-  // canvas sizes) that ChatPanel does not have. WorldExploration owns those
-  // inputs, so it is responsible for providing a getGeometrySnapshot getter on
-  // the debugContext prop (DebugContext = ExportContext already declares the
-  // field as optional). We forward debugContext.getGeometrySnapshot when
-  // present and fall back to () => undefined otherwise — debugExport handles
-  // the null case gracefully (the GEOMETRY SNAPSHOT section degrades to
-  // "(snapshot unavailable)").
-  const exportContext = useMemo<ExportContext | undefined>(
-    () =>
-      debugContext
-        ? {
-            ...debugContext,
-            getDebugLogBuffer: () => getDebugLogBuffer(),
-            getClickTraceBuffer: () => getClickTraceBuffer(),
-            getGeometrySnapshot:
-              debugContext.getGeometrySnapshot ?? (() => undefined),
-          }
-        : undefined,
-    [debugContext],
-  );
+  // SECTION 4 (build #329): build ExportContext at click time from the live
+  // ref (preferred) or the optional debugContext prop. Getters for the debug
+  // log, click trace, and geometry snapshot are invoked at export time.
+  const resolveExportContext = useCallback((): ExportContext | undefined => {
+    const ctx = debugContextRef?.current ?? debugContext;
+    if (!ctx) return undefined;
+    return {
+      ...ctx,
+      getDebugLogBuffer: () => getDebugLogBuffer(),
+      getClickTraceBuffer: () => getClickTraceBuffer(),
+      getGeometrySnapshot: ctx.getGeometrySnapshot ?? (() => undefined),
+    };
+  }, [debugContext, debugContextRef]);
 
   // Shift+D → open debug tab and unfold
   useEffect(() => {
@@ -857,9 +850,16 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }, [battleLogEntries.length, isFolded, activeChannel]);
 
+  // PERF-2026-09-02-056: derive summon rows once per battleLogEntries identity
+  // so unread tracking and the Summons channel share one filter pass.
+  const summonLogEntries = useMemo(
+    () => battleLogEntries.filter((e) => e.isSummon === true),
+    [battleLogEntries],
+  );
+
   // Track unread summon log entries
   useEffect(() => {
-    const newCount = battleLogEntries.filter((e) => e.isSummon === true).length;
+    const newCount = summonLogEntries.length;
     if (newCount > lastSeenSummonsCount.current) {
       if (isFolded || activeChannel !== "summons") {
         setUnreadSummons(
@@ -873,7 +873,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       lastSeenSummonsCount.current = 0;
       setUnreadSummons(0);
     }
-  }, [battleLogEntries, isFolded, activeChannel]);
+  }, [summonLogEntries, isFolded, activeChannel]);
 
   const fetchMessages = useCallback(async () => {
     if (!actor) return;
@@ -982,9 +982,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         lastSeenBattleLogCount.current = battleLogEntries.length;
       } else if (activeChannel === "summons") {
         setUnreadSummons(0);
-        lastSeenSummonsCount.current = battleLogEntries.filter(
-          (e) => e.isSummon === true,
-        ).length;
+        lastSeenSummonsCount.current = summonLogEntries.length;
       } else if (activeChannel === "status") {
         setUnreadStatus(0);
         lastSeenStatusCountRef.current = activeEffects.length;
@@ -996,6 +994,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     activeChannel,
     messages,
     battleLogEntries,
+    summonLogEntries,
     activeEffects.length,
   ]);
 
@@ -1228,7 +1227,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               aria-haspopup="true"
               aria-expanded={channelMenuOpen}
               onClick={() => setChannelMenuOpen((v) => !v)}
-              className="flex items-center justify-center border-0 rounded-md transition-colors duration-150 cursor-pointer"
+              className="stone-touch-target flex items-center justify-center border-0 rounded-md transition-colors duration-150 cursor-pointer"
               style={{
                 flexShrink: 0,
                 width: 24,
@@ -1462,8 +1461,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                   ))
                 ))}
               {activeChannel === "summons" &&
-                (battleLogEntries.filter((e) => e.isSummon === true).length ===
-                0 ? (
+                (summonLogEntries.length === 0 ? (
                   <div
                     data-ocid="chat.summons.empty_state"
                     className="text-muted-foreground"
@@ -1477,31 +1475,29 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                     No summon actions yet.
                   </div>
                 ) : (
-                  battleLogEntries
-                    .filter((e) => e.isSummon === true)
-                    .map((entry) => (
-                      <div
-                        key={entry.id}
-                        data-ocid="chat.summons.entry"
+                  summonLogEntries.map((entry) => (
+                    <div
+                      key={entry.id}
+                      data-ocid="chat.summons.entry"
+                      style={{
+                        fontSize: 11,
+                        lineHeight: 1.5,
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      <span
                         style={{
-                          fontSize: 11,
-                          lineHeight: 1.5,
-                          wordBreak: "break-word",
+                          color: "rgba(160,160,170,0.6)",
+                          fontSize: 10,
+                          marginRight: 5,
+                          fontVariantNumeric: "tabular-nums",
                         }}
                       >
-                        <span
-                          style={{
-                            color: "rgba(160,160,170,0.6)",
-                            fontSize: 10,
-                            marginRight: 5,
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          [{entry.timestamp}]
-                        </span>
-                        <BattleLogText text={entry.text} color={entry.color} />
-                      </div>
-                    ))
+                        [{entry.timestamp}]
+                      </span>
+                      <BattleLogText text={entry.text} color={entry.color} />
+                    </div>
+                  ))
                 ))}
               {activeChannel === "status" && renderStatusContent()}
               {activeChannel === "debug" && (
@@ -1718,7 +1714,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                       onClick={() => {
                         const w = window.open("", "_blank");
                         if (w) {
-                          w.document.write(buildDebugReportHtml(exportContext));
+                          w.document.write(
+                            buildDebugReportHtml(resolveExportContext()),
+                          );
                           w.document.close();
                           setTimeout(() => w.print(), 250);
                         }
@@ -1749,7 +1747,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                       data-ocid="chat.debug.export_txt_button"
                       onClick={() => {
                         const blob = new Blob(
-                          [buildDebugReportText(exportContext)],
+                          [buildDebugReportText(resolveExportContext())],
                           { type: "text/plain" },
                         );
                         const a = document.createElement("a");
@@ -1988,7 +1986,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                   className="stone-inset"
                   style={{
                     flex: 1,
-                    fontSize: 12,
+                    fontSize: 16,
                     padding: "5px 8px",
                     fontFamily: "var(--font-body)",
                   }}
@@ -1998,7 +1996,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                   data-ocid="chat.send_button"
                   onClick={handleSend}
                   disabled={!inputText.trim() || isSending}
-                  className="stone-btn-crimson"
+                  aria-label="Send message"
+                  className="stone-btn-crimson stone-touch-target"
                   style={{
                     width: 32,
                     height: 32,
@@ -2107,4 +2106,4 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   );
 };
 
-export default ChatPanel;
+export default memo(ChatPanel);

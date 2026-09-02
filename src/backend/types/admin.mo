@@ -215,6 +215,32 @@ module {
         timestamp       : Int;       // nanoseconds since epoch (Time.now())
         status          : Text;      // "pending" | "completed" | "cancelled"
     };
+
+    /// Player GameKey purchase request. The plaintext code is never stored here.
+    /// status: "pending" | "approved" | "rejected" | "redeemed"
+    public type GameKeyRequest = {
+        id               : Text;
+        userPrincipal    : Principal;
+        email            : Text;
+        emailConsent     : Bool;
+        hintedEuroCents  : Nat;
+        timestamp        : Int;
+        status           : Text;
+        dokaAmount       : Nat;
+        emailed          : Bool;
+        approvedAt       : Int;
+        redeemedAt       : Int;
+        redeemedBy       : Text;
+    };
+
+    /// Ledger keyed by the 120-char GameKey. Player queries never return this.
+    public type GameKeyLedgerEntry = {
+        requestId  : Text;
+        dokaAmount : Nat;
+        redeemed   : Bool;
+        redeemedBy : Text;
+    };
+
     /// Configuration for an achievement, admin-editable.
     ///
     /// condition: machine-readable key used by frontend to detect when the

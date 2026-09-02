@@ -1717,26 +1717,3 @@ export function cleanupBossState(
   bossStateRef.current = null;
   setBossState(null);
 }
-
-// ── Hook export ────────────────────────────────────────────────────────────────────
-
-export interface UseBossSystemParams {
-  bossStateRef: React.MutableRefObject<BossState | null>;
-  setBossState: (s: BossState | null) => void;
-  pendingTimeoutsRef: React.MutableRefObject<
-    Set<ReturnType<typeof setTimeout>>
-  >;
-  aiGenerationRef: React.MutableRefObject<number>;
-}
-
-export function useBossSystem(_params: UseBossSystemParams) {
-  return {
-    initBossState,
-    checkPhaseTransition,
-    applyBossAbility,
-    cleanupBossState: (
-      ref: React.MutableRefObject<BossState | null>,
-      setter: (s: BossState | null) => void,
-    ) => cleanupBossState(ref, setter),
-  };
-}

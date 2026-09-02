@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Crown, LogOut, ShoppingCart, Trophy } from "lucide-react";
-import React from "react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGetCallerDokaBalance } from "../hooks/useAdminQueries";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
@@ -85,11 +85,13 @@ const GameFlow: React.FC<GameFlowProps> = ({
   // backendDokaBalance !== undefined is one render too early: the session
   // cache is still 0 and idle hydrate would treat that placeholder as live.
   const [dokaSessionApplied, setDokaSessionApplied] = useState(false);
-  // SECTION 4 (build #325): debug context threaded up from WorldExploration so
-  // ChatPanel's export-report builder can include live character/map/battle state.
-  const [debugContext, setDebugContext] = useState<DebugContext | undefined>(
-    undefined,
-  );
+  // SECTION 4 (build #325): debug context written by WorldExploration into a
+  // ref so ChatPanel export can read live character/map/battle state without
+  // re-rendering the chat tree on every turn.
+  const debugContextRef = useRef<DebugContext | undefined>(undefined);
+  const handleDebugContextChange = useCallback((ctx: DebugContext) => {
+    debugContextRef.current = ctx;
+  }, []);
   const { data: backendDokaBalance } = useGetCallerDokaBalance();
   // actor removed — not used in this component
 
@@ -261,7 +263,7 @@ const GameFlow: React.FC<GameFlowProps> = ({
             sessionCacheApplied: dokaSessionApplied,
           })}
           onDokaBalanceChange={setDokaBalance}
-          onDebugContextChange={setDebugContext}
+          onDebugContextChange={handleDebugContextChange}
           itemShopOpen={showShop}
           onItemShopClose={handleItemShopClose}
           achievementsOpen={showAchievements}
@@ -274,7 +276,7 @@ const GameFlow: React.FC<GameFlowProps> = ({
           activeEffects={activeEffects}
           isPaused={isInBattle || isTransitioning}
           userId={String(userProfile.id ?? userProfile.name ?? "guest")}
-          debugContext={debugContext}
+          debugContextRef={debugContextRef}
           // debugLogs removed — ChatPanel now sources from structured debugLogger buffer
         />
         {/* Snap spacer only — the live XP / zone / Doka HUD lives in
@@ -283,7 +285,7 @@ const GameFlow: React.FC<GameFlowProps> = ({
         <div
           ref={topBarRef}
           className="fixed top-0 left-0 right-0 z-[9000] pointer-events-none"
-          style={{ height: "calc(44px + env(safe-area-inset-top, 0px))" }}
+          style={{ height: "var(--app-top-hud-height)" }}
           aria-hidden
         />
         {/* Realm tools sit just under the world HUD so they stay reachable
@@ -292,7 +294,7 @@ const GameFlow: React.FC<GameFlowProps> = ({
         <div
           className="fixed z-[9001] pointer-events-auto flex items-center gap-2 px-2 py-1"
           style={{
-            top: "calc(46px + env(safe-area-inset-top, 0px))",
+            top: "calc(var(--app-top-hud-height) + 2px)",
             right: "max(8px, env(safe-area-inset-right, 0px))",
             minHeight: 44,
             background:
@@ -443,23 +445,6 @@ const GameFlow: React.FC<GameFlowProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="hidden md:flex items-center gap-2 text-xs">
-            {(["character"] as const).map((stage, i) => (
-              <React.Fragment key={stage}>
-                {i > 0 && (
-                  <div
-                    className="w-3 h-px"
-                    style={{ background: "rgba(216,70,63,.3)" }}
-                  />
-                )}
-                <span
-                  className={`px-2 py-1 rounded text-xs ${currentStage === stage ? "stone-pill-gold" : "stone-pill text-[#8a8090]"}`}
-                >
-                  {stage === "character" ? "Character" : "Dungeon"}
-                </span>
-              </React.Fragment>
-            ))}
-          </div>
           {isAdmin && onOpenAdmin && (
             <button
               type="button"
@@ -524,7 +509,7 @@ const LeaderboardModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         className="stone-frame"
         style={{
           width: "min(640px, 94vw)",
-          maxHeight: "80vh",
+          maxHeight: "min(80vh, 80dvh)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -543,7 +528,7 @@ const LeaderboardModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             data-ocid="leaderboard.close_button"
             onClick={onClose}
             aria-label="Close leaderboard"
-            className="stone-btn-slate"
+            className="stone-btn-slate stone-modal-close"
             style={{
               width: 30,
               height: 30,

@@ -5,16 +5,22 @@ import {
   type Challenge,
   type ChallengePanelProgress,
   DEFAULT_CHALLENGES,
+  applyChallengeDirectHit,
   castFollowUpShouldDebitAp,
   castResultAppliesCooldown,
   castResultSpendsAp,
+  challengeFailCopy,
   isChallengeCompleted,
   isChallengeFailed,
+  isPlayerHealTargetId,
   isSpellOnCooldown,
+  isStrikerChallengeComplete,
   nextSpellCooldownTurns,
   recordChallengeApSpend,
   recordChallengeDamageTaken,
   recordChallengeDirectHit,
+  recordChallengeHealFromHpRestore,
+  recordChallengeItemHealUsed,
   recordChallengePlayerTurnStart,
   recordChallengeSelfHpLoss,
   recordChallengeWalkHazardDamage,
@@ -38,6 +44,7 @@ function progress(
     healUsed: false,
     directHit: true,
     maxApUsedInTurn: 4,
+    directHitAttempts: 0,
     ...overrides,
   };
 }
@@ -224,6 +231,9 @@ describe("isChallengeCompleted", () => {
       isChallengeFailed(striker, progress({ directHit: false })),
       true,
     );
+    assert.match(challengeFailCopy(striker), /beyond 2 tiles/i);
+    assert.match(challengeFailCopy(byId("easy_1")), /heal was used/i);
+    assert.match(challengeFailCopy(byId("legendary_1")), /damage was taken/i);
   });
 
   it("does not invent a completion for an unknown condition", () => {
@@ -330,7 +340,11 @@ describe("recordInBattleChallengeHealUsed", () => {
 
   it("does not clear an in-battle heal that already failed the objective", () => {
     assert.equal(recordInBattleChallengeHealUsed(false, true), true);
-    assert.equal(recordInBattleChallengeHealUsed(true, false), true);
+    assert.equal(
+      recordInBattleChallengeHealUsed(true, false),
+      true,
+      "jackpot and paid Doka heals in battle must fail no_healing",
+    );
     assert.equal(
       isChallengeCompleted(
         byId("easy_1"),
@@ -339,6 +353,80 @@ describe("recordInBattleChallengeHealUsed", () => {
         }),
       ),
       false,
+    );
+  });
+
+  it("in-battle BuffShop potion heal fails easy_1 / hard_1", () => {
+    const healUsed = recordChallengeItemHealUsed(true, false);
+    assert.equal(healUsed, true);
+    assert.equal(
+      isChallengeCompleted(byId("easy_1"), progress({ healUsed })),
+      false,
+    );
+    assert.equal(
+      isChallengeCompleted(byId("hard_1"), progress({ healUsed })),
+      false,
+    );
+    assert.equal(
+      recordChallengeItemHealUsed(false, false),
+      false,
+      "overworld item use must not stick healUsed into the next fight",
+    );
+  });
+
+  it("fails no-heal when Life Drain or ctx.heal actually restores HP in battle", () => {
+    assert.equal(isPlayerHealTargetId("player"), true);
+    assert.equal(isPlayerHealTargetId("__player__"), true);
+    assert.equal(isPlayerHealTargetId("wisp-1"), false);
+    const healUsed = recordChallengeHealFromHpRestore(true, false, 10);
+    assert.equal(healUsed, true);
+    assert.equal(
+      isChallengeCompleted(byId("easy_1"), progress({ healUsed })),
+      false,
+    );
+    assert.equal(
+      isChallengeCompleted(byId("hard_1"), progress({ healUsed })),
+      false,
+    );
+    assert.equal(
+      addChallengeRewardDeltas(
+        0,
+        0,
+        liveBattleChallengePersistEntries(true, byId("easy_1"), false),
+      ).dokaFromChallenges,
+      0,
+      "easy_1 50 Doka must not persist after an in-battle HP restore",
+    );
+    assert.equal(
+      addChallengeRewardDeltas(
+        0,
+        0,
+        liveBattleChallengePersistEntries(true, byId("hard_1"), false),
+      ).xpDelta,
+      0,
+      "hard_1 500 XP must not persist after an in-battle HP restore",
+    );
+  });
+
+  it("does not fail no-heal for a 0-HP drain or an overworld restore", () => {
+    assert.equal(recordChallengeHealFromHpRestore(true, false, 0), false);
+    assert.equal(
+      recordChallengeHealFromHpRestore(true, false, Number.NaN),
+      false,
+    );
+    assert.equal(
+      recordChallengeHealFromHpRestore(false, false, 12),
+      false,
+      "overworld ctx.heal must not stick healUsed into the next fight",
+    );
+    assert.equal(
+      isChallengeCompleted(
+        byId("easy_1"),
+        progress({
+          healUsed: recordChallengeHealFromHpRestore(true, false, 0),
+        }),
+      ),
+      true,
     );
   });
 });
@@ -468,6 +556,33 @@ describe("challenge completion → persist XP", () => {
       [],
     );
   });
+
+  it("does not persist Striker when the fight had no spent spell attempt", () => {
+    // legendary_3 starts directHit=true. A lava / reflect / wait win never
+    // calls applyChallengeDirectHit, so the panel still reads on-track and
+    // used to persist 400 Doka / 800 XP.
+    const striker = byId("legendary_3");
+    const vacuous = progress({ directHit: true, directHitAttempts: 0 });
+    assert.equal(isStrikerChallengeComplete(vacuous), false);
+    assert.equal(
+      isStrikerChallengeComplete({ directHit: true }),
+      false,
+      "pre-fix progress omitted attempts and still persisted Striker",
+    );
+    assert.equal(isChallengeCompleted(striker, vacuous), false);
+    assert.deepEqual(
+      liveBattleChallengePersistEntries(
+        true,
+        striker,
+        isChallengeCompleted(striker, vacuous),
+      ),
+      [],
+    );
+    const deltas = addChallengeRewardDeltas(12, 80, []);
+    assert.equal(deltas.dokaDelta, 12);
+    assert.equal(deltas.xpDelta, 80);
+    assert.equal(deltas.dokaFromChallenges, 0);
+  });
 });
 
 describe("recordChallengeApSpend", () => {
@@ -567,25 +682,28 @@ describe("recordChallengeApSpend", () => {
 describe("recordChallengeDirectHit", () => {
   it("fails Striker after a sprite-click beyond Chebyshev 2", () => {
     const caster = { x: 8, y: 8 };
-    let direct = true;
-    direct = recordChallengeDirectHit(direct, caster, { x: 10, y: 8 });
-    assert.equal(direct, true);
+    let state = { stillDirect: true, attempts: 0 };
+    state = applyChallengeDirectHit(state, caster, { x: 10, y: 8 });
+    assert.equal(state.stillDirect, true);
+    assert.equal(state.attempts, 1);
 
-    direct = recordChallengeDirectHit(direct, caster, { x: 11, y: 8 });
-    assert.equal(direct, false);
-    direct = recordChallengeDirectHit(direct, caster, { x: 8, y: 9 });
-    assert.equal(direct, false);
+    state = applyChallengeDirectHit(state, caster, { x: 11, y: 8 });
+    assert.equal(state.stillDirect, false);
+    assert.equal(state.attempts, 2);
+    state = applyChallengeDirectHit(state, caster, { x: 8, y: 9 });
+    assert.equal(state.stillDirect, false);
 
     const striker = byId("legendary_3");
-    assert.equal(
-      isChallengeCompleted(striker, progress({ directHit: direct })),
-      false,
-    );
+    const snap = progress({
+      directHit: state.stillDirect,
+      directHitAttempts: state.attempts,
+    });
+    assert.equal(isChallengeCompleted(striker, snap), false);
     assert.deepEqual(
       liveBattleChallengePersistEntries(
         true,
         striker,
-        isChallengeCompleted(striker, progress({ directHit: direct })),
+        isChallengeCompleted(striker, snap),
       ),
       [],
     );
@@ -593,27 +711,28 @@ describe("recordChallengeDirectHit", () => {
 
   it("fails Striker after a controlled summon casts beyond Chebyshev 2", () => {
     const summon = { x: 8, y: 8 };
-    let direct = true;
+    let state = { stillDirect: true, attempts: 0 };
     // Adjacent / range-2 shots stay legal.
-    direct = recordChallengeDirectHit(direct, summon, { x: 10, y: 8 });
-    assert.equal(direct, true);
+    state = applyChallengeDirectHit(state, summon, { x: 10, y: 8 });
+    assert.equal(state.stillDirect, true);
 
     // Archer Poison Arrow (range 4) / Slow (range 3) from control mode.
-    direct = recordChallengeDirectHit(direct, summon, { x: 12, y: 8 });
-    assert.equal(direct, false);
-    direct = recordChallengeDirectHit(direct, summon, { x: 8, y: 9 });
-    assert.equal(direct, false);
+    state = applyChallengeDirectHit(state, summon, { x: 12, y: 8 });
+    assert.equal(state.stillDirect, false);
+    state = applyChallengeDirectHit(state, summon, { x: 8, y: 9 });
+    assert.equal(state.stillDirect, false);
 
     const striker = byId("legendary_3");
-    assert.equal(
-      isChallengeCompleted(striker, progress({ directHit: direct })),
-      false,
-    );
+    const snap = progress({
+      directHit: state.stillDirect,
+      directHitAttempts: state.attempts,
+    });
+    assert.equal(isChallengeCompleted(striker, snap), false);
     assert.deepEqual(
       liveBattleChallengePersistEntries(
         true,
         striker,
-        isChallengeCompleted(striker, progress({ directHit: direct })),
+        isChallengeCompleted(striker, snap),
       ),
       [],
     );
@@ -621,19 +740,40 @@ describe("recordChallengeDirectHit", () => {
 
   it("still completes when every spent attempt stays within 2 tiles", () => {
     const caster = { x: 5, y: 5 };
-    let direct = true;
-    direct = recordChallengeDirectHit(direct, caster, { x: 7, y: 6 });
-    direct = recordChallengeDirectHit(direct, caster, { x: 5, y: 5 });
+    let state = { stillDirect: true, attempts: 0 };
+    state = applyChallengeDirectHit(state, caster, { x: 7, y: 6 });
+    state = applyChallengeDirectHit(state, caster, { x: 5, y: 5 });
     const striker = byId("legendary_3");
+    const snap = progress({
+      directHit: state.stillDirect,
+      directHitAttempts: state.attempts,
+    });
+    assert.equal(state.attempts, 2);
+    assert.equal(isChallengeCompleted(striker, snap), true);
     assert.equal(
-      isChallengeCompleted(striker, progress({ directHit: direct })),
+      challengeXpFromEntries(
+        liveBattleChallengePersistEntries(
+          true,
+          striker,
+          isChallengeCompleted(striker, snap),
+        ),
+      ),
+      800,
+    );
+  });
+
+  it("does not treat the opening directHit=true flag as a spent attempt", () => {
+    assert.equal(
+      recordChallengeDirectHit(true, { x: 1, y: 1 }, { x: 1, y: 1 }),
       true,
     );
     assert.equal(
-      challengeXpFromEntries(
-        liveBattleChallengePersistEntries(true, striker, true),
-      ),
-      800,
+      isStrikerChallengeComplete({ directHit: true, directHitAttempts: 0 }),
+      false,
+    );
+    assert.equal(
+      isStrikerChallengeComplete({ directHit: true, directHitAttempts: 1 }),
+      true,
     );
   });
 });

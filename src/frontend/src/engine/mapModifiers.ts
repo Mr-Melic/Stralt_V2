@@ -502,6 +502,17 @@ export function getModifierDefinition(
   return MODIFIER_BY_ID.get(id);
 }
 
+/** Admin dropdown options — one entry per live registry id. */
+export function listAdminModifierTypeOptions(): {
+  value: string;
+  label: string;
+}[] {
+  return MAP_MODIFIERS.map((m) => ({
+    value: m.id,
+    label: `${m.name} — ${m.announceText}`,
+  }));
+}
+
 // ── Resolver: applies all active modifiers' hooks for a given point ─────────
 
 export const mapModifierRegistry = {

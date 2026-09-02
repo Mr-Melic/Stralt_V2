@@ -10,7 +10,11 @@ import AdminLib "lib/admin";
 import AdminGuard "lib/adminGuard";
 import Array "mo:core/Array";
 import Nat "mo:core/Nat";
+import Int "mo:core/Int";
 import Float "mo:core/Float";
+import Blob "mo:core/Blob";
+import { ic } "mo:ic";
+import GameKey "lib/gameKey";
 
 import OQL "mo:caffeineai-oql";
 import Expose "mo:caffeineai-oql/Expose";
@@ -66,6 +70,9 @@ actor {
         if (caller.isAnonymous()) {
             return;
         };
+        if (bannedPrincipals.containsKey(caller.toText())) {
+            return;
+        };
         // ProfileSetup allows 2–50 chars; empty name is rejected there. Cap
         // here so a raw client cannot store an unbounded display name.
         if (profile.name.size() > 50) {
@@ -84,6 +91,9 @@ actor {
     public shared ({ caller }) func saveUserUiLayout(layout : Text) : async { #ok; #err : Text } {
         if (caller.isAnonymous()) {
             return #err("Unauthorized: anonymous caller");
+        };
+        if (bannedPrincipals.containsKey(caller.toText())) {
+            return #err("Account banned for non-payment");
         };
         if (layout.size() > 65_536) {
             return #err("uiLayout exceeds maximum size");
@@ -229,7 +239,7 @@ actor {
 
     func _isHexColor(colorHex : Text) : Bool {
         if (colorHex.size() != 7) { return false };
-        var iter = colorHex.chars();
+        let iter = colorHex.chars();
         switch (iter.next()) {
             case (?c) { if (c != '#') { return false } };
             case null { return false };
@@ -273,46 +283,13 @@ actor {
         false
     };
 
-    /// Paid spell levels live in parallel arrays. A stale appearance edit or
-    /// older client must not drop or downgrade an id that upgradeSpell wrote.
-    /// Union keys; keep max(existing, incoming) per id. Empty incoming keeps
-    /// the store. Mismatched incoming lengths are ignored (keep store).
-    func _spellLevelAt(keys : [Text], vals : [Nat], id : Text) : Nat {
-        var idx : Nat = 0;
-        for (k in keys.values()) {
-            if (k == id and idx < vals.size()) { return vals[idx] };
-            idx += 1;
-        };
-        0
-    };
-
-    func _mergeSpellLevels(
-        existingKeys : [Text],
-        existingVals : [Nat],
-        incomingKeys : [Text],
-        incomingVals : [Nat],
-    ) : ([Text], [Nat]) {
-        if (incomingKeys.size() == 0) {
-            return (existingKeys, existingVals);
-        };
-        if (incomingKeys.size() != incomingVals.size()) {
-            return (existingKeys, existingVals);
-        };
-        var outKeys : [Text] = [];
-        var outVals : [Nat] = [];
-        let consider = func(id : Text) {
-            if (outKeys.contains(id)) { return };
-            let lvl = Nat.max(
-                _spellLevelAt(existingKeys, existingVals, id),
-                _spellLevelAt(incomingKeys, incomingVals, id),
-            );
-            outKeys := outKeys.concat([id]);
-            outVals := outVals.concat([lvl]);
-        };
-        for (k in existingKeys.values()) { consider(k) };
-        for (k in incomingKeys.values()) { consider(k) };
-        (outKeys, outVals)
-    };
+    /// Appearance edits used to union incoming spell arrays and take
+    /// max(existing, incoming) per id. A custom client could then:
+    ///   1. inject a retired catalog id the player never owned, after which
+    ///      upgradeSpell treats `found=true` and skips the retirement check;
+    ///   2. raise paid levels without going through upgradeSpell.
+    /// Official CharacterCreation only rewrites cosmetics and already sends
+    /// the stored keys (or []). Keep the store. upgradeSpell is the sole writer.
 
     public shared ({ caller }) func createCharacter(slot : Nat, character : Character) : async { #ok; #err : Text } {
         if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
@@ -441,22 +418,16 @@ actor {
         // Official editor only changes cosmetics (name, piece, colors, pattern).
         // Session / completion / loadout have dedicated writers. Do not accept
         // a client-supplied bossRushMasterComplete or shrineCount here.
-        // Spell levels: upgradeSpell is the sole paid writer. Union + max so a
-        // stale CharacterCreation payload (empty or older keys) cannot wipe
-        // upgrades a newer client already persisted.
-        let (mergedSpellKeys, mergedSpellValues) = _mergeSpellLevels(
-            ec.spellLevelKeys,
-            ec.spellLevelValues,
-            character.spellLevelKeys,
-            character.spellLevelValues,
-        );
+        // Spell levels: upgradeSpell is the sole writer. Keep the store
+        // verbatim — ignore incoming arrays so a stale or malicious appearance
+        // payload cannot add ids, raise levels, or wipe paid upgrades.
         let mergedCharacter : Character = {
             character with
             level = ec.level;
             experience = ec.experience;
             stats = ec.stats;
-            spellLevelKeys = mergedSpellKeys;
-            spellLevelValues = mergedSpellValues;
+            spellLevelKeys = ec.spellLevelKeys;
+            spellLevelValues = ec.spellLevelValues;
             bloodBalance = ec.bloodBalance;
             covenantBuff = ec.covenantBuff;
             shrineCount = ec.shrineCount;
@@ -479,6 +450,9 @@ actor {
     public shared ({ caller }) func deleteCharacter(slot : Nat) : async { #ok; #err : Text } {
         if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
             return #err("Unauthorized: Only users can delete characters");
+        };
+        if (bannedPrincipals.containsKey(caller.toText())) {
+            return #err("Account banned for non-payment");
         };
 
         if (slot < 1 or slot > 3) {
@@ -755,6 +729,53 @@ actor {
         };
     };
 
+    /// Package isAdmin traps when the caller is unregistered. Admin queries
+    /// must not trap — the official client treats a miss as "not admin".
+    func _isAdminPrincipal(caller : Principal) : Bool {
+        if (caller.isAnonymous()) { return false };
+        switch (accessControlState.userRoles.get(caller)) {
+            case (?#admin) { true };
+            case _ { false };
+        };
+    };
+
+    /// Shared guards for assignUserRole and the Candid-compatible
+    /// assignCallerUserRole replacement. Failure: MixinAuthorization.assignRole
+    /// allowed self-demotion and #guest, which permanently locks out the
+    /// last admin because adminAssigned stays true.
+    func _roleAssignRejected(
+        caller : Principal,
+        target : Principal,
+        role : AccessControl.UserRole,
+    ) : ?Text {
+        if (not _isAdminPrincipal(caller)) {
+            return ?"Unauthorized: admin only";
+        };
+        if (target.isAnonymous()) {
+            return ?"Cannot assign a role to the anonymous principal";
+        };
+        if (target == caller and role != #admin) {
+            return ?"Refusing self-demotion: another admin must change your role";
+        };
+        switch (role) {
+            case (#guest) { return ?"role must be \"admin\" or \"user\"" };
+            case (#admin) {};
+            case (#user) {};
+        };
+        let callerKey = caller.toText();
+        let now = Time.now();
+        switch (roleChangeTimestamps.get(callerKey)) {
+            case (?last) {
+                if (now - last < ROLE_CHANGE_MIN_NS) {
+                    return ?"Rate limit: wait 30 seconds between role changes";
+                };
+            };
+            case null {};
+        };
+        roleChangeTimestamps.add(callerKey, now);
+        null
+    };
+
     // ─── Enemy config API ────────────────────────────────────────────────
 
     public shared ({ caller }) func adminSetEnemyConfig(config : EnemyConfig) : async { #ok; #err : Text } {
@@ -918,10 +939,21 @@ actor {
         if (not AccessControl.hasPermission(accessControlState, caller, #admin)) {
             return #err("Unauthorized: admin only");
         };
-        if (chance > 100) {
-            return #err("chance must be between 0 and 100");
+        switch (AdminGuard.validateMapModifierChance(id, chance)) {
+            case (?e) { return #err(e) };
+            case null {};
         };
-        AdminLib.setMapModifierChance(mapModifierConfigs, id, chance);
+        let prevChance = switch (mapModifierConfigs.get(id)) {
+            case null { return #err("Map modifier '" # id # "' not found") };
+            case (?existing) { existing.triggerChance.toText() };
+        };
+        switch (AdminLib.setMapModifierChance(mapModifierConfigs, id, chance)) {
+            case (#err e) { #err(e) };
+            case (#ok) {
+                _recordAdminAudit(caller, "setMapModifierChance", id, prevChance, chance.toText());
+                #ok
+            };
+        };
     };
 
     // ─── Spell upgrade (per character) ──────────────────────────────────
@@ -1108,70 +1140,32 @@ actor {
     let purchaseRecords : Map.Map<Text, AdminTypes.PurchaseRecord>;
     var nextPurchaseId  : Nat;
 
+    let gameKeyRequests : Map.Map<Text, AdminTypes.GameKeyRequest>;
+    let gameKeyLedger : Map.Map<Text, AdminTypes.GameKeyLedgerEntry>;
+    let gameKeyReveals : Map.Map<Text, Text>;
+    let lastGameKeyRequestAt : Map.Map<Principal, Int>;
+    var nextGameKeyRequestId : Nat;
+
     /// Banned principals cannot play until unbanned.
     let bannedPrincipals : Map.Map<Text, Bool>;
 
-    /// Player initiates a purchase — creates a pending record.
-    /// Returns the purchase id so the frontend can track it.
-    /// H5: Accepts all customer fields including proofFileUrl.
+    /// Legacy nine-arg KYC checkout. Replaced by requestGameKeyPurchase.
+    /// Signature kept so older clients fail with a clear #err instead of minting.
     public shared ({ caller }) func initiatePurchase(
-        packageId       : Text,
-        customerName    : Text,
-        customerSurname : Text,
-        customerEmail   : Text,
-        customerAddress : Text,
-        customerCity    : Text,
-        customerCountry : Text,
-        customerPostal  : Text,
-        proofFileUrl    : Text,
+        _packageId       : Text,
+        _customerName    : Text,
+        _customerSurname : Text,
+        _customerEmail   : Text,
+        _customerAddress : Text,
+        _customerCity    : Text,
+        _customerCountry : Text,
+        _customerPostal  : Text,
+        _proofFileUrl    : Text,
     ) : async { #ok : Text; #err : Text } {
         if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
             return #err("Unauthorized: must be logged in");
         };
-        if (bannedPrincipals.containsKey(caller.toText())) {
-            return #err("Account banned for non-payment");
-        };
-        let pkg = switch (shopPackages.get(packageId)) {
-            case null { return #err("Unknown package: " # packageId) };
-            case (?p) { p };
-        };
-        if (
-            customerName.size() > 200 or customerSurname.size() > 200
-            or customerEmail.size() > 200 or customerAddress.size() > 200
-            or customerCity.size() > 200 or customerCountry.size() > 200
-            or customerPostal.size() > 200
-        ) {
-            return #err("Customer field exceeds maximum length");
-        };
-        switch (AdminGuard.validateProofFileUrl(proofFileUrl)) {
-            case (?e) { return #err(e) };
-            case null {};
-        };
-        // B4: rollover guard — wrap counter at 999_999_999 to prevent integer overflow
-        //     on long-running canisters.
-        nextPurchaseId += 1;
-        if (nextPurchaseId > 999_999_999) {
-            nextPurchaseId := 1;
-        };
-        let id = "pur_" # nextPurchaseId.toText();
-        let record : AdminTypes.PurchaseRecord = {
-            id;
-            userPrincipal   = caller;
-            dokaAmount      = pkg.dokaAmount;
-            packageId;
-            customerName;
-            customerSurname;
-            customerEmail;
-            customerAddress;
-            customerCity;
-            customerCountry;
-            customerPostal;
-            proofFileUrl;
-            timestamp       = Time.now();
-            status          = "pending";
-        };
-        purchaseRecords.add(id, record);
-        #ok(id);
+        #err("Doka purchases now use GameKey requests. Call requestGameKeyPurchase after paying via Mollie.");
     };
 
     /// Returns the caller's purchase history.
@@ -1222,6 +1216,24 @@ actor {
         switch (AdminGuard.validateDokaGrant(dokaAmount)) {
             case (?e) { return #err(e) };
             case null {};
+        };
+        switch (purchaseId) {
+            case null {};
+            case (?pid) {
+                switch (purchaseRecords.get(pid)) {
+                    case null { return #err("Purchase record not found") };
+                    case (?rec) {
+                        switch (AdminGuard.purchaseCreditRejected(
+                            rec.userPrincipal.toText(),
+                            userPrincipal.toText(),
+                            rec.status,
+                        )) {
+                            case (?e) { return #err(e) };
+                            case null {};
+                        };
+                    };
+                };
+            };
         };
         let current = switch (dokaBalances.get(userPrincipal)) {
             case null { 0 };
@@ -1318,26 +1330,11 @@ actor {
         #ok;
     };
 
-    /// Auto-complete any pending purchases older than 60 seconds and credit Doka.
-    func _autoCompletePendingPurchases(forPrincipal : Principal) {
-        let sixtySecondsNs : Int = 60_000_000_000;
-        let now = Time.now();
-        let pending = purchaseRecords.values().filter(func(r : AdminTypes.PurchaseRecord) : Bool {
-            r.userPrincipal == forPrincipal and
-            r.status == "pending" and
-            (now - r.timestamp) >= sixtySecondsNs
-        }).toArray();
-        for (rec in pending.values()) {
-            purchaseRecords.add(rec.id, { rec with status = "completed" });
-            let current = switch (dokaBalances.get(rec.userPrincipal)) {
-                case null { 0 };
-                case (?b) { b };
-            };
-            dokaBalances.add(rec.userPrincipal, current + rec.dokaAmount);
-        };
-    };
+    /// Legacy 60s auto-complete. Paid Doka now credits only via redeemGameKey.
+    func _autoCompletePendingPurchases(_forPrincipal : Principal) {};
 
-    /// Player calls this to trigger auto-completion of their pending purchases.
+    /// Kept so shop remount still calls a no-op credit that honors
+    /// shouldCommitShopCredit (commit only when the wallet actually gained).
     public shared ({ caller }) func processPendingPurchases() : async Nat {
         if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
             return 0;
@@ -1346,9 +1343,313 @@ actor {
             return 0;
         };
         _autoCompletePendingPurchases(caller);
-        purchaseRecords.values().filter(func(r : AdminTypes.PurchaseRecord) : Bool {
-            r.userPrincipal == caller and r.status == "completed"
-        }).toArray().size()
+        ignore nextPurchaseId;
+        0
+    };
+
+    func _hasOpenGameKeyRequest(who : Principal) : Bool {
+        for (r in gameKeyRequests.values()) {
+            if (r.userPrincipal == who and (r.status == "pending" or r.status == "approved")) {
+                return true;
+            };
+        };
+        false
+    };
+
+    func _latestGameKeyRequest(who : Principal) : ?AdminTypes.GameKeyRequest {
+        var best : ?AdminTypes.GameKeyRequest = null;
+        for (r in gameKeyRequests.values()) {
+            if (r.userPrincipal == who) {
+                switch (best) {
+                    case null { best := ?r };
+                    case (?b) {
+                        if (r.timestamp > b.timestamp) { best := ?r };
+                    };
+                };
+            };
+        };
+        best
+    };
+
+    func _generateGameKey() : async Text {
+        var out = "";
+        var guard = 0;
+        while (out.size() < GameKey.CODE_LENGTH and guard < 32) {
+            guard += 1;
+            let entropy = await ic.raw_rand();
+            out := GameKey.appendFromEntropy(out, entropy.toArray());
+        };
+        out
+    };
+
+    func _newUniqueGameKey() : async { #ok : Text; #err : Text } {
+        var attempts = 0;
+        while (attempts < 8) {
+            attempts += 1;
+            let code = await _generateGameKey();
+            switch (GameKey.validateCodeFormat(code)) {
+                case (?e) { return #err(e) };
+                case null {};
+            };
+            if (not gameKeyLedger.containsKey(code)) {
+                return #ok(code);
+            };
+        };
+        #err("Could not generate a unique GameKey from IC randomness")
+    };
+
+    /// Player: submit a GameKey purchase request (email + consent, optional euro hint).
+    public shared ({ caller }) func requestGameKeyPurchase(
+        email : Text,
+        emailConsent : Bool,
+        hintedEuroCents : Nat,
+    ) : async { #ok : Text; #err : Text } {
+        if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+            return #err("Unauthorized: must be logged in");
+        };
+        if (bannedPrincipals.containsKey(caller.toText())) {
+            return #err("Account banned for non-payment");
+        };
+        let trimmedEmail = email.trim(#char ' ');
+        switch (GameKey.validateEmail(trimmedEmail)) {
+            case (?e) { return #err(e) };
+            case null {};
+        };
+        switch (GameKey.validateConsent(emailConsent)) {
+            case (?e) { return #err(e) };
+            case null {};
+        };
+        switch (GameKey.validateHintEuroCents(hintedEuroCents)) {
+            case (?e) { return #err(e) };
+            case null {};
+        };
+        switch (GameKey.rejectOpenRequest(_hasOpenGameKeyRequest(caller))) {
+            case (?e) { return #err(e) };
+            case null {};
+        };
+        let now = Time.now();
+        switch (lastGameKeyRequestAt.get(caller)) {
+            case (?last) {
+                if (GameKey.requestCooldownActive(last, now)) {
+                    return #err("Please wait before submitting another request");
+                };
+            };
+            case null {};
+        };
+        nextGameKeyRequestId += 1;
+        if (nextGameKeyRequestId > 999_999_999) {
+            nextGameKeyRequestId := 1;
+        };
+        let id = "gk_" # nextGameKeyRequestId.toText();
+        let record : AdminTypes.GameKeyRequest = {
+            id;
+            userPrincipal = caller;
+            email = trimmedEmail;
+            emailConsent;
+            hintedEuroCents;
+            timestamp = now;
+            status = "pending";
+            dokaAmount = 0;
+            emailed = false;
+            approvedAt = 0;
+            redeemedAt = 0;
+            redeemedBy = "";
+        };
+        gameKeyRequests.add(id, record);
+        lastGameKeyRequestAt.add(caller, now);
+        #ok(id);
+    };
+
+    /// Player-visible status for the latest request. Never includes a GameKey.
+    public query ({ caller }) func getMyGameKeyPurchaseStatus() : async ?AdminTypes.GameKeyRequest {
+        _latestGameKeyRequest(caller)
+    };
+
+    /// Player: redeem a 120-char GameKey. Credits the caller, not the requester.
+    public shared ({ caller }) func redeemGameKey(code : Text) : async { #ok : Nat; #err : Text } {
+        if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+            return #err("Unauthorized: must be logged in");
+        };
+        if (bannedPrincipals.containsKey(caller.toText())) {
+            return #err("Account banned for non-payment");
+        };
+        let trimmed = code.trim(#char ' ');
+        switch (GameKey.validateCodeFormat(trimmed)) {
+            case (?e) { return #err(e) };
+            case null {};
+        };
+        var ledgerHit : ?AdminTypes.GameKeyLedgerEntry = null;
+        for ((stored, entry) in gameKeyLedger.entries()) {
+            if (GameKey.constantTimeEqual(stored, trimmed)) {
+                ledgerHit := ?entry;
+            };
+        };
+        switch (ledgerHit) {
+            case null { return #err("Invalid GameKey") };
+            case (?entry) {
+                if (entry.redeemed) {
+                    return #err("GameKey already used");
+                };
+                switch (gameKeyRequests.get(entry.requestId)) {
+                    case null { return #err("Invalid GameKey") };
+                    case (?rec) {
+                        if (rec.status == "pending") {
+                            return #err("GameKey is not yet approved");
+                        };
+                        if (rec.status == "rejected") {
+                            return #err("Invalid GameKey");
+                        };
+                        if (rec.status == "redeemed") {
+                            return #err("GameKey already used");
+                        };
+                        if (rec.status != "approved") {
+                            return #err("Invalid GameKey");
+                        };
+                        switch (AdminGuard.validateDokaGrant(entry.dokaAmount)) {
+                            case (?e) { return #err(e) };
+                            case null {};
+                        };
+                        let current = switch (dokaBalances.get(caller)) {
+                            case null { 0 };
+                            case (?b) { b };
+                        };
+                        dokaBalances.add(caller, current + entry.dokaAmount);
+                        let now = Time.now();
+                        let redeemedBy = caller.toText();
+                        gameKeyLedger.add(trimmed, {
+                            entry with
+                            redeemed = true;
+                            redeemedBy;
+                        });
+                        gameKeyRequests.add(rec.id, {
+                            rec with
+                            status = "redeemed";
+                            redeemedAt = now;
+                            redeemedBy;
+                        });
+                        gameKeyReveals.remove(rec.id);
+                        #ok(entry.dokaAmount)
+                    };
+                };
+            };
+        };
+    };
+
+    /// Admin: incoming GameKey purchase requests. No plaintext codes.
+    public query ({ caller }) func adminListGameKeyRequests() : async { #ok : [AdminTypes.GameKeyRequest]; #err : Text } {
+        if (not AccessControl.hasPermission(accessControlState, caller, #admin)) {
+            return #err("Unauthorized: admin only");
+        };
+        let arr = gameKeyRequests.values().toArray();
+        #ok(
+            arr.sort(func(a : AdminTypes.GameKeyRequest, b : AdminTypes.GameKeyRequest) : { #less; #equal; #greater } {
+                Int.compare(b.timestamp, a.timestamp)
+            })
+        )
+    };
+
+    /// Admin: after Mollie payment, set Doka worth and mint a 120-char GameKey
+    /// from IC `raw_rand`. Returns the code once; store it only in the reveal map.
+    public shared ({ caller }) func adminApproveGameKeyPurchase(
+        requestId : Text,
+        dokaAmount : Nat,
+    ) : async { #ok : Text; #err : Text } {
+        if (not AccessControl.hasPermission(accessControlState, caller, #admin)) {
+            return #err("Unauthorized: admin only");
+        };
+        switch (AdminGuard.validateDokaGrant(dokaAmount)) {
+            case (?e) { return #err(e) };
+            case null {};
+        };
+        switch (gameKeyRequests.get(requestId)) {
+            case null { return #err("Purchase request not found") };
+            case (?rec) {
+                if (rec.status != "pending") {
+                    return #err("Request is not pending");
+                };
+                switch (await _newUniqueGameKey()) {
+                    case (#err e) { return #err(e) };
+                    case (#ok code) {
+                        // raw_rand yields. Re-read so a reject (or a second
+                        // approve) that landed during the await cannot be
+                        // overwritten into an extra redeemable GameKey.
+                        switch (gameKeyRequests.get(requestId)) {
+                            case null { return #err("Purchase request not found") };
+                            case (?latest) {
+                                if (latest.status != "pending") {
+                                    return #err("Request is not pending");
+                                };
+                                let now = Time.now();
+                                gameKeyLedger.add(code, {
+                                    requestId = latest.id;
+                                    dokaAmount;
+                                    redeemed = false;
+                                    redeemedBy = "";
+                                });
+                                gameKeyReveals.add(latest.id, code);
+                                gameKeyRequests.add(latest.id, {
+                                    latest with
+                                    status = "approved";
+                                    dokaAmount;
+                                    approvedAt = now;
+                                });
+                                _recordAdminAudit(caller, "approveGameKey", latest.userPrincipal.toText(), "pending", dokaAmount.toText());
+                                #ok(code)
+                            };
+                        };
+                    };
+                };
+            };
+        };
+    };
+
+    /// Admin: payment never arrived.
+    public shared ({ caller }) func adminRejectGameKeyPurchase(requestId : Text) : async { #ok; #err : Text } {
+        if (not AccessControl.hasPermission(accessControlState, caller, #admin)) {
+            return #err("Unauthorized: admin only");
+        };
+        switch (gameKeyRequests.get(requestId)) {
+            case null { return #err("Purchase request not found") };
+            case (?rec) {
+                if (rec.status != "pending") {
+                    return #err("Only pending requests can be rejected");
+                };
+                gameKeyRequests.add(rec.id, { rec with status = "rejected" });
+                _recordAdminAudit(caller, "rejectGameKey", rec.userPrincipal.toText(), "pending", "rejected");
+                #ok
+            };
+        };
+    };
+
+    /// Admin: one-time reveal until marked emailed. Empty #err if already wiped.
+    public query ({ caller }) func adminGetGameKeyReveal(requestId : Text) : async { #ok : Text; #err : Text } {
+        if (not AccessControl.hasPermission(accessControlState, caller, #admin)) {
+            return #err("Unauthorized: admin only");
+        };
+        switch (gameKeyReveals.get(requestId)) {
+            case null { #err("GameKey is no longer available to copy") };
+            case (?code) { #ok(code) };
+        };
+    };
+
+    /// Admin: confirm the code was copied/mailed. Wipes the plaintext reveal.
+    /// The canister cannot send email; this is the honest hand-off.
+    public shared ({ caller }) func adminMarkGameKeyEmailed(requestId : Text) : async { #ok; #err : Text } {
+        if (not AccessControl.hasPermission(accessControlState, caller, #admin)) {
+            return #err("Unauthorized: admin only");
+        };
+        switch (gameKeyRequests.get(requestId)) {
+            case null { return #err("Purchase request not found") };
+            case (?rec) {
+                if (rec.status != "approved" and rec.status != "redeemed") {
+                    return #err("Request has no GameKey to mark emailed");
+                };
+                gameKeyReveals.remove(rec.id);
+                gameKeyRequests.add(rec.id, { rec with emailed = true });
+                _recordAdminAudit(caller, "markGameKeyEmailed", rec.userPrincipal.toText(), "reveal", "wiped");
+                #ok
+            };
+        };
     };
 
 
@@ -1357,8 +1658,10 @@ actor {
     var gameConfig : AdminTypes.AdminGameConfig;
 
     // Seed the default game config on first run (fresh installs only).
+    // Sentinel is dokaSpawnBaseValue==0 — dokaSpawnChance==0 is a legal
+    // live value and must not wipe a valid admin singleton.
     do {
-        if (gameConfig.dokaSpawnChance == 0) {
+        if (AdminGuard.gameConfigNeedsSeed(gameConfig)) {
             gameConfig := AdminLib.defaultGameConfig();
         };
     };
@@ -1726,13 +2029,30 @@ actor {
             case _ { return #err("Invalid slot") };
         };
 
-        // Clamp hp to 0 — CharacterStats.hp is Nat. Cap at the same formula
-        // updateCharacter used so a heal snapshot cannot mint unbounded HP.
-        let maxHpAllowed : Nat = character.level * 200 + 100;
+        // Clamp hp to 0 — CharacterStats.hp is Nat. Cap at the official
+        // overworld / heal formula, but never cut HP already stored under the
+        // old level*200+100 cap or a previous growth percent (SDEG-2026-09-02-003).
+        let maxHpAllowed : Nat = AdminGuard.persistHpWriteCap(
+            character.stats.hp,
+            character.level,
+            levelUpConfig.statGrowthPercent,
+        );
         let rawHp : Nat = if (hp <= 0) { 0 } else { hp.toNat() };
         let safeHp : Nat = _minNat(rawHp, maxHpAllowed);
-        let safeAp : Nat = _minNat(maxAp, 20);
-        let safeMp : Nat = _minNat(maxMp, 20);
+        // Official battle AP/MP is PLAYER_BASE + floor(level / threshold).
+        // A flat 20 cap let a raw client persist 20 AP/MP at level 1.
+        let maxApAllowed : Nat = AdminGuard.persistApWriteCap(
+            character.stats.ap,
+            character.level,
+            levelUpConfig.apMpLevelThreshold,
+        );
+        let maxMpAllowed : Nat = AdminGuard.persistMpWriteCap(
+            character.stats.mp,
+            character.level,
+            levelUpConfig.apMpLevelThreshold,
+        );
+        let safeAp : Nat = _minNat(maxAp, maxApAllowed);
+        let safeMp : Nat = _minNat(maxMp, maxMpAllowed);
 
         // Official heal/death/shop writes current stored atk/res/init. Do not
         // accept an inflated combat snapshot from a custom client.
@@ -1766,10 +2086,11 @@ actor {
         };
         let writeDoka : Nat = if (dokaBalance > currentDoka) { currentDoka } else { dokaBalance };
         let writeXp : Nat = if (xp > character.experience) { character.experience } else { xp };
-        let writeLevel : Nat = if (_level > character.level) { character.level } else { _level };
+        // applyRewards is the sole level writer. A lower client _level used
+        // to demote the character (death/heal snapshots must not rewrite level).
         let updatedCharacter : Character = {
             character with
-            level            = writeLevel;
+            level            = character.level;
             experience       = writeXp;
             stats            = updatedStats;
         };
@@ -1907,6 +2228,7 @@ actor {
         if (not found) {
             return #err("No package found with dokaAmount = " # dokaAmount.toText());
         };
+        _recordAdminAudit(caller, "setShopPaymentLink", dokaAmount.toText(), "previous", "updated");
         #ok;
     };
 
@@ -2028,7 +2350,10 @@ actor {
 
     /// Returns the version string of the changelog the given user has already seen.
     /// Empty string means the user has not seen any changelog yet.
-    public query func getChangelogShownVersion(user : Principal) : async Text {
+    public query ({ caller }) func getChangelogShownVersion(user : Principal) : async Text {
+        if (caller != user) {
+            return "";
+        };
         switch (changelogShownVersions.get(user)) {
             case null { "" };
             case (?v) { v };
@@ -2100,6 +2425,38 @@ actor {
           .toArray();
     };
 
+    func _slotBestLevel(slots : CharacterSlots) : Nat {
+        var best : Nat = 0;
+        let consider = func(cOpt : ?Character) {
+            switch (cOpt) {
+                case null {};
+                case (?c) { if (c.level > best) { best := c.level } };
+            };
+        };
+        consider(slots.slot1);
+        consider(slots.slot2);
+        consider(slots.slot3);
+        best
+    };
+
+    func _slotBestSpellLevel(slots : CharacterSlots) : Nat {
+        var best : Nat = 0;
+        let consider = func(cOpt : ?Character) {
+            switch (cOpt) {
+                case null {};
+                case (?c) {
+                    for (v in c.spellLevelValues.values()) {
+                        if (v > best) { best := v };
+                    };
+                };
+            };
+        };
+        consider(slots.slot1);
+        consider(slots.slot2);
+        consider(slots.slot3);
+        best
+    };
+
     /// Player: mark an achievement as unlocked (called by the frontend when the condition is met).
     /// Idempotent — calling again on an already-unlocked achievement is a no-op.
     public shared ({ caller }) func markAchievementUnlocked(achievementId : Text) : async { #ok; #err : Text } {
@@ -2109,13 +2466,31 @@ actor {
         if (bannedPrincipals.containsKey(caller.toText())) {
             return #err("Account banned for non-payment");
         };
-        switch (achievementConfigs.get(achievementId)) {
+        let unlockCfg = switch (achievementConfigs.get(achievementId)) {
             case null { return #err("Unknown achievement: " # achievementId) };
             case (?cfg) {
                 if (not cfg.active) {
                     return #err("Achievement is retired");
                 };
+                cfg
             };
+        };
+        let slotsForUnlock = characterSlots.get(caller);
+        let bestLevel = switch (slotsForUnlock) {
+            case null { 0 };
+            case (?s) { _slotBestLevel(s) };
+        };
+        let bestSpellLevel = switch (slotsForUnlock) {
+            case null { 0 };
+            case (?s) { _slotBestSpellLevel(s) };
+        };
+        let unlockDoka = switch (dokaBalances.get(caller)) {
+            case null { 0 };
+            case (?b) { b };
+        };
+        switch (AdminGuard.achievementUnlockRejected(unlockCfg.condition, bestLevel, unlockDoka, bestSpellLevel)) {
+            case (?e) { return #err(e) };
+            case null {};
         };
         let key = caller.toText() # "#" # achievementId;
         switch (achievementProgress.get(key)) {
@@ -2161,6 +2536,9 @@ actor {
         if (progress.claimed) {
             return #err("Reward already claimed");
         };
+        if (not AdminGuard.knownAchievementCondition(config.condition)) {
+            return #err("condition is not a recognized value");
+        };
         // Mark as claimed.
         achievementProgress.add(key, { progress with claimed = true });
         // Credit Doka to the principal-level balance.
@@ -2190,34 +2568,15 @@ actor {
     /// M1: rate-limited — the same caller cannot change roles more than once per 30 s.
     public shared ({ caller }) func assignUserRole(target : Principal, role : Text) : async { #ok; #err : Text } {
         _ensureRegistered(caller);
-        if (not AccessControl.isAdmin(accessControlState, caller)) {
-            return #err("Unauthorized: admin only");
-        };
         switch (AdminGuard.validateAssignRole(role)) {
             case (?e) { return #err(e) };
             case null {};
         };
-        if (target.isAnonymous()) {
-            return #err("Cannot assign a role to the anonymous principal");
-        };
-        // Last-admin lockout: adminAssigned stays true forever, so self-demotion
-        // of the only admin cannot be repaired by first-login initialize().
-        if (target == caller and role != "admin") {
-            return #err("Refusing self-demotion: another admin must change your role");
-        };
-        // M1: rate limit
-        let callerKey = caller.toText();
-        let now = Time.now();
-        switch (roleChangeTimestamps.get(callerKey)) {
-            case (?last) {
-                if (now - last < ROLE_CHANGE_MIN_NS) {
-                    return #err("Rate limit: wait 30 seconds between role changes");
-                };
-            };
+        let resolvedRole : AccessControl.UserRole = if (role == "admin") { #admin } else { #user };
+        switch (_roleAssignRejected(caller, target, resolvedRole)) {
+            case (?e) { return #err(e) };
             case null {};
         };
-        roleChangeTimestamps.add(callerKey, now);
-        let resolvedRole : AccessControl.UserRole = if (role == "admin") { #admin } else { #user };
         AccessControl.assignRole(accessControlState, caller, target, resolvedRole);
         _recordAdminAudit(caller, "assignUserRole", target.toText(), "previous", role);
         #ok;
@@ -2244,6 +2603,8 @@ actor {
     /// In-memory only — intentionally clears on canister upgrade.
     transient var chatMessages : List.List<ChatMessage> = List.empty();
     transient var nextChatId   : Nat = 0;
+    transient let chatLastSent : Map.Map<Text, Int> = Map.empty();
+    transient let CHAT_COOLDOWN_NS : Int = 2_000_000_000;
 
     /// Append a new message; trims list to at most 200 entries (oldest dropped).
     public shared ({ caller }) func sendMessage(_playerName : Text, text : Text, colorHex : Text) : async () {
@@ -2256,6 +2617,17 @@ actor {
         if (text.size() == 0 or text.size() > 200) {
             return;
         };
+        let nowChat = Time.now();
+        let chatKey = caller.toText();
+        switch (chatLastSent.get(chatKey)) {
+            case (?last) {
+                if (AdminGuard.chatCooldownActive(last, nowChat, CHAT_COOLDOWN_NS)) {
+                    return;
+                };
+            };
+            case null {};
+        };
+        chatLastSent.add(chatKey, nowChat);
         // Official ChatPanel sends userProfile.name. Bind the displayed name
         // to the caller's stored profile so a raw client cannot impersonate.
         let displayName = switch (userProfiles.get(caller)) {
@@ -2651,14 +3023,20 @@ actor {
         if (not AccessControl.hasPermission(accessControlState, caller, #admin)) {
             return #err("Unauthorized: admin only");
         };
-        if (portalId == "") {
-            return #err("portalId cannot be empty");
+        switch (AdminGuard.validateBossPortalAssignment(portalId, bossId)) {
+            case (?e) { return #err(e) };
+            case null {};
         };
         switch (bossConfigs.get(bossId)) {
             case null { return #err("Boss not found: " # bossId) };
             case (?_) {};
         };
+        let prev = switch (bossPortalAssignments.get(portalId)) {
+            case null { "none" };
+            case (?bid) { bid };
+        };
         bossPortalAssignments.add(portalId, bossId);
+        _recordAdminAudit(caller, "setBossPortalAssignment", portalId, prev, bossId);
         #ok;
     };
 
@@ -2667,7 +3045,12 @@ actor {
         if (not AccessControl.hasPermission(accessControlState, caller, #admin)) {
             return #err("Unauthorized: admin only");
         };
+        let prev = switch (bossPortalAssignments.get(portalId)) {
+            case null { "none" };
+            case (?bid) { bid };
+        };
         bossPortalAssignments.remove(portalId);
+        _recordAdminAudit(caller, "deleteBossPortalAssignment", portalId, prev, "removed");
         #ok;
     };
 
@@ -2961,18 +3344,20 @@ actor {
         };
         let completedRoom = roomIndex + 1; // 1-indexed room completed
         let newHighest = if (completedRoom > existing.highestRoomCompleted) { completedRoom } else { existing.highestRoomCompleted };
-        // A full run = all 10 rooms completed (roomIndex 9 = room 10).
-        let newTotalRuns = if (roomIndex == 9) { existing.totalBossRushRuns + 1 } else { existing.totalBossRushRuns };
+        // Count a master run only while still occupying room 9. Repeat
+        // complete(9) after that used to increment totalBossRushRuns forever.
+        let countRun = AdminGuard.shouldCountBossRushRun(existing.currentRoom, roomIndex);
+        let newTotalRuns = if (countRun) { existing.totalBossRushRuns + 1 } else { existing.totalBossRushRuns };
+        let newCurrent = if (countRun) { 0 } else { existing.currentRoom };
         bossRushStates.add(key, {
-            currentRoom            = existing.currentRoom;
+            currentRoom            = newCurrent;
             highestRoomCompleted   = newHighest;
             totalBossRushRuns      = newTotalRuns;
         });
 
-        let isMasterRun = roomIndex == 9;
         let updatedCharacter : Character = {
             character with
-            bossRushMasterComplete = if (isMasterRun) { ?true } else { character.bossRushMasterComplete };
+            bossRushMasterComplete = if (countRun) { ?true } else { character.bossRushMasterComplete };
         };
         let updatedSlots = switch (slot) {
             case 1 { { existingSlots with slot1 = ?updatedCharacter } };
@@ -3389,6 +3774,23 @@ actor {
                 .payload("customerCountry", func ((_, r)) = r.customerCountry)
                 .payload("timestamp",       func ((_, r)) = r.timestamp)
                 .payload("status",          func ((_, r)) = r.status)
+                .ownedBy("userPrincipal")
+                .controllerOrScoped()
+                .build(),
+            OQL.Entity.manual<(Text, AdminTypes.GameKeyRequest)>(
+                "gameKeyRequests",
+                func () = gameKeyRequests.entries(),
+                "GameKeyRequest",
+                "id",
+            )
+                .payload("id", func ((k, _)) = k)
+                .payload("userPrincipal", func ((_, r)) = r.userPrincipal.toText())
+                .payload("email", func ((_, r)) = r.email)
+                .payload("hintedEuroCents", func ((_, r)) = r.hintedEuroCents)
+                .payload("timestamp", func ((_, r)) = r.timestamp)
+                .payload("status", func ((_, r)) = r.status)
+                .payload("dokaAmount", func ((_, r)) = r.dokaAmount)
+                .payload("emailed", func ((_, r)) = r.emailed)
                 .ownedBy("userPrincipal")
                 .controllerOrScoped()
                 .build(),

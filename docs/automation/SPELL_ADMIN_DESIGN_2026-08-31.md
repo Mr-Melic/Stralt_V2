@@ -5,6 +5,10 @@
 **Date:** 2026-08-31  
 **Scope:** Owner tooling for the complete spell ecosystem. **No production code in this PR.**
 
+**2026-09-01 re-audit:** contract below still stands. Partial safety work landed on the wrong field (`usableByPlayer=false` as retire). Evidence and ACTION_IDs: [`SPELL_ADMIN_DESIGN_2026-09-01.md`](./SPELL_ADMIN_DESIGN_2026-09-01.md), [`ACTION_IDS_SDA_2026-09-01.md`](./ACTION_IDS_SDA_2026-09-01.md).
+
+**2026-09-02 re-audit:** contract below still stands. Bindgen summon lag closed; lifecycle is still the cast flag. Current HEAD evidence and ACTION_IDs: [`SPELL_ADMIN_DESIGN_2026-09-02.md`](./SPELL_ADMIN_DESIGN_2026-09-02.md), [`ACTION_IDS_SDA_2026-09-02.md`](./ACTION_IDS_SDA_2026-09-02.md).
+
 This document is the design source for the ACTION_IDs in [`ACTION_IDS_2026-08-31.md`](./ACTION_IDS_2026-08-31.md). Implementers must treat it as a contract, not a license to invent name-based heuristics or to hard-delete live refs.
 
 ---

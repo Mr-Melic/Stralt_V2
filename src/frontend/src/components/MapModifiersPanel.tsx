@@ -1,4 +1,5 @@
 import type React from "react";
+import { memo } from "react";
 import type { MapModifierConfig } from "../types/gameTypes";
 import DraggablePanel from "./DraggablePanel";
 
@@ -160,4 +161,4 @@ const MapModifiersPanel: React.FC<MapModifiersPanelProps> = ({
   );
 };
 
-export default MapModifiersPanel;
+export default memo(MapModifiersPanel);

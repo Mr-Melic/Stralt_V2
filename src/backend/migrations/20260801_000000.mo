@@ -5,12 +5,21 @@ import AccessControl "mo:caffeineai-authorization/access-control";
 
 module {
 
-  // Empty-canister genesis. Caffeine GitHub import deploys onto a fresh canister
-  // whose previous stable signature has no fields. The rest of the chain
-  // (20260827 drop-transients, 20260831 summon fields) still describes upgrades
-  // from a real populated actor — those steps are skipped when the deployed
-  // tail already matches them. This file must stay first in lex order and must
-  // not become the OldActor of a populated upgrade.
+  // Empty-canister genesis. A fresh Caffeine install runs the whole chain from
+  // a canister whose previous stable signature has no fields. The rest of the
+  // chain (20260827 drop-transients, 20260831 summon + rollback, 20260901
+  // GameKey) describes upgrades from a real populated actor.
+  //
+  // The runtime only runs chain files whose name sorts AFTER the latest
+  // migration already recorded on the canister. This file was named
+  // 20260826_000000 until 2026-09-02; the original Caffeine canister
+  // (cwofb-yqaaa-aaaap-qp45q-cai) recorded `20260803_185500` as its first
+  // migration, so a 20260826 genesis was *pending* there and its `{}` input
+  // collided with the 37 legacy fields already in memory (RTS error:
+  // Memory-incompatible program upgrade, reproduced on PocketIC). Sorting
+  // before 20260803_185500 keeps it skipped on every populated canister and
+  // still first on an empty one. Must stay first in lex order and must never
+  // become the OldActor of a populated upgrade.
 
   // ─── Inlined types (must match 20260827 OldActor; no project imports) ──
 

@@ -14,6 +14,7 @@ import {
   toBackendPlayerSpriteConfig,
   toBackendSpellConfig,
 } from "../utils/adminContract";
+import { validateSpellConfig } from "../utils/adminSafety";
 import { useActor } from "./useActor";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,6 +61,24 @@ export function useAdminSetSpellConfig() {
   return useMutation({
     mutationFn: async (config: SpellConfig) => {
       if (!actor) throw new Error("Actor not available");
+      const spellErr = validateSpellConfig({
+        id: config.id,
+        name: config.name,
+        apCost: Number(config.apCost),
+        minRange: Number(config.minRange ?? 0),
+        maxRange: Number(config.maxRange ?? config.range ?? 0),
+        spellType: String(config.spellType ?? "damage"),
+        effectType: config.effectType,
+        effectCategory: String(config.effectCategory ?? "damage"),
+        isSummon: config.isSummon,
+        summonAI: config.summonAI,
+        summonLifespan: config.summonLifespan,
+        summonPieceType: config.summonUnitDef?.pieceType,
+        summonLevel: config.summonUnitDef?.level,
+        hpScale: config.summonUnitDef?.hpScale,
+        damageScale: config.summonUnitDef?.damageScale,
+      });
+      if (spellErr) throw new Error(spellErr);
       const result = await (actor as ActorAny).adminSetSpellConfig(
         toBackendSpellConfig(config),
       );

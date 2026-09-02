@@ -301,6 +301,7 @@ const BossGuideModal: React.FC<BossGuideModalProps> = ({
             type="button"
             data-ocid="boss_guide.close_button"
             onClick={onClose}
+            className="stone-modal-close"
             style={{
               background: "transparent",
               border: "none",

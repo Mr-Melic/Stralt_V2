@@ -1,10 +1,13 @@
 # Stralt expansion catalog — 2026-08-31
 
+> **Archive.** Living catalog moved to [`EXPANSION_PROPOSALS_2026-09-01.md`](./EXPANSION_PROPOSALS_2026-09-01.md).  
+> Cards in this file stay historical. The 2026-09-01 run re-verified them on `dd275aa`: all remain `PROPOSED` (none `SHIPPED` / `SUPERSEDED`). Do not silently rewrite these cards.
+
 **Author:** Expansion Director (cron `0 */24 * * *`)  
 **This run:** first catalog (`HEAD` `22503b5`, `fix: keep generated maps solvable across seeds (#110)`)  
 **Gameplay / production code:** not modified.
 
-Prior expansion proposals: **none** in-repo, no GitHub issues, no automation memories. This file is the living catalog. Later runs should re-rank against `main` and mark cards `SUPERSEDED` / `SHIPPED` rather than silently rewriting history.
+Prior expansion proposals: **none** in-repo, no GitHub issues, no automation memories. This file was the living catalog through 2026-08-31. Later runs re-rank against `main` and mark cards `SUPERSEDED` / `SHIPPED` rather than silently rewriting history.
 
 Score used for ranking:
 

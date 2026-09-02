@@ -3,8 +3,21 @@ import List "mo:core/List";
 
 module {
 
-  // Seed explicit summon metadata onto persisted admin SpellConfig rows.
+  // Seed explicit summon metadata onto persisted admin SpellConfig rows and
+  // introduce the admin rollback snapshots + audit log.
   // Inlined types stay frozen if project types change later.
+  //
+  // FROZEN — this NewActor (summon + rollback + adminAuditLog, NO GameKey) is
+  // the tail of the build Caffeine deployed on 2026-08-31 (PR #181 merge
+  // f8aa05e, first successful import). Caffeine compares every later import
+  // against that signature (`.old/src/backend/dist/backend.most`), and moc
+  // requires every field at this chain position that no later step produces.
+  // PR #258 added the GameKey maps here → the deployed tail lacked them
+  // (runtime: `stable variable … not found in persisted state`); PR #311 kept
+  // them here and Caffeine's `mops check` failed at compile time with M0263.
+  // Do not edit OldActor / NewActor / field types. New stables go in a later
+  // lex file (20260901_000000 introduces GameKey; use 20260902+ for anything
+  // new) with `OldActor = {}`; see .cursor/rules/eop-stable-migrations.mdc.
 
   type OldSpellConfig = {
     id : Text;

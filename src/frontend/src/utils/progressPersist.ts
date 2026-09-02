@@ -165,18 +165,46 @@ export type HydrateWhenIdleOptions = {
  * A ghost HUD (failed applyRewards still credited locally, or a stale
  * high query) used to copy incoming >= committed and let the next
  * saveBattleStats mint. Credits and spends already commit on the lock.
+ *
+ * An unseeded GameKey / feat `#ok` must not be followed by an idle copy of
+ * the in-flight getCallerDokaBalance snapshot. That query is the pre-credit
+ * wallet; seeding from it marks the lock ready so the next saveBattleStats
+ * skips resolveCommittedDokaForAbsoluteWrite and wipes the paid grant.
  */
 export function shouldCopyIdleWalletDoka(args: {
   walletSeeded: boolean;
   walletReady?: boolean;
   incomingDoka: number;
   committedDoka: number;
+  idleWalletSeedBlocked?: boolean;
 }): boolean {
   if (args.walletSeeded) return false;
+  if (args.idleWalletSeedBlocked === true) return false;
   return args.walletReady === true;
 }
 
-export function createProgressPersist(initial?: Partial<CommittedProgress>) {
+export type ProgressPersistEnqueueOptions = {
+  /**
+   * Death persist writes the pending marker then the 20/40 cut. Running
+   * beforeEach (flush of that same marker) first would persist after, then
+   * computeDeathPenalty on the already-cut lock — a second 20/40.
+   */
+  skipBeforeEach?: boolean;
+};
+
+export type ProgressPersistOptions = {
+  /**
+   * Runs at the head of every enqueue except skipBeforeEach. Used to flush
+   * an unpaid death penalty before heal / shop / applyRewards / upgrade
+   * can persist the unpenalized snapshot.
+   */
+  beforeEach?: () => Promise<void>;
+};
+
+export function createProgressPersist(
+  initial?: Partial<CommittedProgress>,
+  options?: ProgressPersistOptions,
+) {
   let committed: CommittedProgress = {
     doka: Math.max(0, toNat(initial?.doka, 0)),
     xp: Math.max(0, toNat(initial?.xp, 0)),
@@ -185,8 +213,12 @@ export function createProgressPersist(initial?: Partial<CommittedProgress>) {
   // A positive constructor seed came from GameFlow after the query landed.
   // 0 is ambiguous (new wallet vs query still in flight).
   let walletSeeded = initial?.doka != null && toNat(initial.doka, 0) > 0;
+  // Set when a credit landed on an unseeded placeholder. Idle hydrate must
+  // not copy the pre-credit query or death/heal will persist that snapshot.
+  let idleWalletSeedBlocked = false;
   let pending = 0;
   let chain: Promise<void> = Promise.resolve();
+  let beforeEach = options?.beforeEach;
 
   const persist = {
     snapshot(): CommittedProgress {
@@ -200,6 +232,15 @@ export function createProgressPersist(initial?: Partial<CommittedProgress>) {
     },
     seedWallet(doka: number) {
       persist.commit({ doka: Math.max(0, toNat(doka, 0)) });
+    },
+    /**
+     * redeemGameKey / claimAchievementReward `#ok` on an unseeded lock must
+     * not seed at grant-only, but the next walletReady hydrate used to copy
+     * the stale pre-credit query and mark the lock seeded. Death/heal then
+     * skipped the live fetch and saveBattleStats-wiped the paid grant.
+     */
+    noteUnseededCredit() {
+      if (!walletSeeded) idleWalletSeedBlocked = true;
     },
     commit(next: Partial<CommittedProgress>) {
       committed = {
@@ -216,7 +257,10 @@ export function createProgressPersist(initial?: Partial<CommittedProgress>) {
             ? Math.max(1, toNat(next.level, committed.level))
             : committed.level,
       };
-      if (next.doka != null) walletSeeded = true;
+      if (next.doka != null) {
+        walletSeeded = true;
+        idleWalletSeedBlocked = false;
+      }
     },
     hydrateWhenIdle(
       next: CommittedProgress,
@@ -228,6 +272,7 @@ export function createProgressPersist(initial?: Partial<CommittedProgress>) {
         walletReady: options?.walletReady,
         incomingDoka: next.doka,
         committedDoka: committed.doka,
+        idleWalletSeedBlocked,
       });
       persist.commit({
         doka: copyDoka ? next.doka : undefined,
@@ -241,9 +286,21 @@ export function createProgressPersist(initial?: Partial<CommittedProgress>) {
       });
       return true;
     },
-    enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    setBeforeEach(fn: (() => Promise<void>) | undefined) {
+      beforeEach = fn;
+    },
+    enqueue<T>(
+      fn: () => Promise<T>,
+      enqueueOptions?: ProgressPersistEnqueueOptions,
+    ): Promise<T> {
       pending += 1;
-      const run = chain.then(fn, fn);
+      const runJob = async () => {
+        if (!enqueueOptions?.skipBeforeEach && beforeEach) {
+          await beforeEach();
+        }
+        return fn();
+      };
+      const run = chain.then(runJob, runJob);
       chain = run.then(
         () => {
           pending -= 1;

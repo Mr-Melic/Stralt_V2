@@ -550,7 +550,8 @@ const FilledSlot: React.FC<{
             data-ocid="character_selection.turn_left"
             onClick={() => onRotate(-1)}
             title="Turn left"
-            className="w-6 h-6 rounded flex items-center justify-center"
+            aria-label="Turn left"
+            className="stone-touch-target w-6 h-6 rounded flex items-center justify-center"
             style={{
               background: "rgba(192,57,43,.15)",
               border: "1px solid rgba(192,57,43,.3)",
@@ -566,7 +567,8 @@ const FilledSlot: React.FC<{
             data-ocid="character_selection.turn_right"
             onClick={() => onRotate(1)}
             title="Turn right"
-            className="w-6 h-6 rounded flex items-center justify-center"
+            aria-label="Turn right"
+            className="stone-touch-target w-6 h-6 rounded flex items-center justify-center"
             style={{
               background: "rgba(192,57,43,.15)",
               border: "1px solid rgba(192,57,43,.3)",

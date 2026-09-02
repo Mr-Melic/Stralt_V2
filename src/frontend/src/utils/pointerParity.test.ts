@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { SYNTHETIC_CLICK_SUPPRESS_MS } from "./pointerGesture.ts";
 import {
   SYNTHETIC_CLICK_GUARD_MS,
   isAttackNearestHotkey,
   shouldBlockWorldMoveOntoPortal,
   shouldIgnoreSyntheticClickAfterTouch,
 } from "./pointerParity.ts";
+
+describe("synthetic click windows", () => {
+  it("keeps pointerParity and pointerGesture on the same 400ms guard", () => {
+    assert.equal(SYNTHETIC_CLICK_GUARD_MS, SYNTHETIC_CLICK_SUPPRESS_MS);
+    assert.equal(SYNTHETIC_CLICK_GUARD_MS, 400);
+  });
+});
 
 describe("shouldIgnoreSyntheticClickAfterTouch", () => {
   it("ignores a click that arrives inside the ghost-click window", () => {

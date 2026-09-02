@@ -5,6 +5,12 @@
 **HEAD inspected:** `22503b5` (`fix: keep generated maps solvable across seeds (#110)`)  
 **Gameplay / production code:** not modified.
 
+**Inventory refresh:** line numbers and the support matrix were re-checked on
+2026-09-01 (`dd275aa`). Use
+[`TELEMETRY_DASHBOARD_2026-09-01.md`](TELEMETRY_DASHBOARD_2026-09-01.md) as the
+current matrix. Views H1–H13 in this file still apply; H14 (admin audit ring)
+was added in the refresh.
+
 This document designs **owner-only** analytical views. It uses only data Stralt
 already persists or that `AQA-2026-08-30-012` already approved. It does not
 invent battle logs, usage events, or custom-asset failure metrics.

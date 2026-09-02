@@ -84,7 +84,8 @@ const GameOverModal: React.FC<GameOverModalProps> = ({
           <AlertDialogFooter className="flex justify-center mt-4">
             <AlertDialogAction
               onClick={onRespawn}
-              className="stone-btn-crimson px-8 py-2"
+              className="stone-btn-crimson stone-touch-target px-8 py-2"
+              style={{ minHeight: 44 }}
             >
               Enter the Death Realm
             </AlertDialogAction>

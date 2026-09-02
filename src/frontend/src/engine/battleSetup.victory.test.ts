@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { shouldAllowBattleTrigger, shouldAwardVictory } from "./battleSetup.ts";
+import {
+  persistBattleEndGuardAfterCleanup,
+  resetBattleEndGuardForNewBattle,
+  shouldAllowBattleTrigger,
+  shouldAwardVictory,
+} from "./battleSetup.ts";
 
 assert.equal(
   shouldAwardVictory({
@@ -116,6 +121,40 @@ assert.equal(
   }),
   true,
   "Death Realm already loaded must allow the next encounter",
+);
+
+assert.equal(
+  shouldAllowBattleTrigger({
+    inBattle: false,
+    inBattleRef: false,
+    transitionInProgress: false,
+    victoryPersistPending: true,
+  }),
+  false,
+  "dismissed recap must not start a new fight while applyRewards is queued",
+);
+
+assert.equal(
+  shouldAllowBattleTrigger({
+    inBattle: false,
+    inBattleRef: false,
+    transitionInProgress: false,
+    victoryPersistPending: false,
+  }),
+  true,
+  "idle overworld after the credit commits may start the next encounter",
+);
+
+assert.equal(
+  persistBattleEndGuardAfterCleanup(true),
+  true,
+  "cleanupBattle must not clear the victory one-shot or applyRewards can run twice",
+);
+assert.equal(persistBattleEndGuardAfterCleanup(false), false);
+assert.equal(
+  resetBattleEndGuardForNewBattle(),
+  false,
+  "the next fight is the only place the victory one-shot resets",
 );
 
 console.log("battleSetup.victory.test: ok");

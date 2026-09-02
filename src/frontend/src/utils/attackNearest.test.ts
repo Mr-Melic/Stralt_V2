@@ -116,6 +116,44 @@ describe("pickNearestAttackableHostile production path", () => {
     );
   });
 
+  it("enables Attack Nearest on the caster tile for Timestep / Shield", () => {
+    const tiles = floorGrid(12);
+    const caster = { x: 5, y: 5 };
+    const rat = unit("rat", 8, 5, { side: "enemy" });
+    const timestep = {
+      ...poison(1),
+      id: "spell-timestep",
+      apCost: 0n,
+      range: 0n,
+      maxRange: 0,
+      minRange: 0,
+      effectType: "buff",
+      targetType: "self",
+    } as SpellConfig;
+    const shield = {
+      ...poison(3),
+      id: "starter-shield",
+      effectType: "buff",
+      targetType: "ally",
+    } as SpellConfig;
+    assert.deepEqual(
+      pickNearestAttackableHostile(timestep, caster, [rat], tiles, 0),
+      caster,
+    );
+    assert.equal(
+      canAttackNearestAgainstLive(timestep, caster, [rat], tiles, 0),
+      true,
+    );
+    assert.deepEqual(
+      pickNearestAttackableHostile(shield, caster, [rat], tiles, 3),
+      caster,
+    );
+    assert.equal(
+      canAttackNearestAgainstLive(shield, caster, [rat], tiles, 3),
+      true,
+    );
+  });
+
   it("still skips a nearer LoS-blocked hostile after the live-store filter", () => {
     const tiles = floorGrid(20);
     tiles[10][11] = "wall";

@@ -8,6 +8,9 @@ import {
   findGroundDokaOnTile,
   markGroundDokaCollected,
   persistDokaCredit,
+  persistDokaCreditResult,
+  settleOneShotAfterCredit,
+  shouldReleaseOneShotDokaCredit,
 } from "./dokaPersist.ts";
 
 describe("persistDokaCredit", () => {
@@ -34,6 +37,17 @@ describe("persistDokaCredit", () => {
     };
     const failed = await persistDokaCredit(failing, 1, 10);
     assert.equal(failed, 0);
+  });
+
+  it("does not release a one-shot claim after a transport miss", async () => {
+    const transport: DokaCreditActor = {
+      applyRewards: async () => {
+        throw new Error("replica reject after add");
+      },
+    };
+    const transportResult = await persistDokaCreditResult(transport, 1, 30);
+    assert.equal(shouldReleaseOneShotDokaCredit(transportResult), false);
+    assert.equal(settleOneShotAfterCredit(transportResult), "keep");
   });
 
   it("reads __kind__/ _ok applyRewards payloads so a credit is not dropped", async () => {

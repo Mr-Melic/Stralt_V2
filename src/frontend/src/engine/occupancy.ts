@@ -7,7 +7,7 @@
  * MUST route through `isCellFree` here so that one combatant per tile is
  * enforced consistently. The check is a full passability pass:
  *
- *   1. In-bounds (0..gridSize-1 on both axes)
+ *   1. In-bounds on the occupancy grid (not a hardcoded world size)
  *   2. Grid tile is walkable (`tiles[y][x] === true`)
  *   3. Not a barrier tile (spell-placed walls)
  *   4. Not a portal tile
@@ -57,6 +57,12 @@ export interface OccupancyContext {
    * `isCellFree` without this set — enemies must be able to path the bridge.
    */
   reserved?: Set<string>;
+  /**
+   * Player tile for joint-cut unseal. Two summons on two 1-wide corridors
+   * are not unique bridges; without this start, spawn/move cannot tell
+   * whether they sealed every exit.
+   */
+  progressStart?: OccCell;
 }
 
 /** Build the canonical "x,y" key used by the barrier/void/portal sets. */
@@ -77,7 +83,9 @@ export function occKey(x: number, y: number): string {
  */
 export function isCellFree(cell: OccCell, ctx: OccupancyContext): boolean {
   const { x, y } = cell;
-  if (x < 0 || x >= WORLD_GRID_SIZE || y < 0 || y >= WORLD_GRID_SIZE) {
+  const h = ctx.tiles.length;
+  const w = ctx.tiles[0]?.length ?? 0;
+  if (x < 0 || y < 0 || x >= w || y >= h) {
     return false;
   }
   if (!ctx.tiles[y]?.[x]) return false;
@@ -105,9 +113,12 @@ export function findNearestFreeCell(
   ctx: OccupancyContext,
   maxRadius: number,
   avoid?: Set<string>,
+  accept?: (cell: OccCell) => boolean,
 ): OccCell | null {
   const ok = (cell: OccCell) =>
-    isCellFree(cell, ctx) && !avoid?.has(occKey(cell.x, cell.y));
+    isCellFree(cell, ctx) &&
+    !avoid?.has(occKey(cell.x, cell.y)) &&
+    (accept?.(cell) ?? true) === true;
   if (ok(origin)) return { x: origin.x, y: origin.y };
   for (let r = 1; r <= maxRadius; r++) {
     // Walk the perimeter of the Manhattan ring of radius r.
@@ -164,6 +175,13 @@ function floodPassable(
   return seen;
 }
 
+/** Manhattan radius that can reach any cell on this occupancy grid. */
+export function progressionSearchRadius(ctx: OccupancyContext): number {
+  const h = ctx.tiles.length;
+  const w = ctx.tiles[0]?.length ?? WORLD_GRID_SIZE;
+  return Math.max(8, w + h);
+}
+
 /**
  * Unique bridges from the player to every exit. A living summon/corpse on
  * one of these cells permanently seals progression; spawn/relocate must
@@ -174,21 +192,244 @@ export function collectMandatoryProgressionCells(
   voidTiles: Set<string>,
   portals: Set<string>,
   start: OccCell,
+  impassable?: Set<string>,
 ): Set<string> {
   const mandatory = new Set<string>();
   if (portals.size === 0) return mandatory;
-  const open = floodPassable(tiles, voidTiles, new Set(), start);
+  const base = new Set(impassable ?? []);
+  const open = floodPassable(tiles, voidTiles, base, start);
   const portalReachable = [...portals].some((p) => open.has(p));
   if (!portalReachable) return mandatory;
   const startKey = occKey(start.x, start.y);
   for (const k of open) {
     if (k === startKey || portals.has(k)) continue;
-    const blocked = new Set<string>([k]);
+    const blocked = new Set<string>(base);
+    blocked.add(k);
     const next = floodPassable(tiles, voidTiles, blocked, start);
     const still = [...portals].some((p) => next.has(p));
     if (!still) mandatory.add(k);
   }
   return mandatory;
+}
+
+/**
+ * Unique player→exit bridges, treating `ctx.barriers` as impassable.
+ * Callers that omit the 5th `collectMandatoryProgressionCells` argument
+ * miss a wall/barrier that already removed one corridor (min-cut drops
+ * to 1). Always derive reserved from the live occupancy context.
+ */
+export function progressionReserved(
+  ctx: OccupancyContext,
+  start?: OccCell,
+): Set<string> {
+  const from = ctx.progressStart ?? start;
+  if (!from || ctx.portals.size === 0) {
+    return ctx.reserved ?? new Set();
+  }
+  return collectMandatoryProgressionCells(
+    ctx.tiles,
+    ctx.voidTiles,
+    ctx.portals,
+    from,
+    ctx.barriers,
+  );
+}
+
+/** True when living occupants jointly cut every player→exit route. */
+export function occupantsSealProgression(
+  tiles: boolean[][],
+  voidTiles: Set<string>,
+  portals: Set<string>,
+  start: OccCell,
+  occupants: OccCell[],
+  impassable?: Set<string>,
+): boolean {
+  if (portals.size === 0) return false;
+  const blocked = new Set(impassable ?? []);
+  for (const o of occupants) blocked.add(occKey(o.x, o.y));
+  blocked.delete(occKey(start.x, start.y));
+  for (const p of portals) blocked.delete(p);
+  const open = floodPassable(tiles, voidTiles, blocked, start);
+  return ![...portals].some((p) => open.has(p));
+}
+
+/**
+ * Treat `cell` as empty — the mover has already left, even if the live
+ * occupancy callback still reports the old tile. Dest-free and unseal
+ * must share this view; a ghost on the origin plus a second summon can
+ * jointly seal every route so relocate never finds an opening.
+ */
+export function occupancyVacating(
+  ctx: OccupancyContext,
+  cell: OccCell,
+): OccupancyContext {
+  return {
+    ...ctx,
+    isOccupied: (c) => {
+      if (c.x === cell.x && c.y === cell.y) return false;
+      return ctx.isOccupied(c);
+    },
+  };
+}
+
+export function collectOccupiedCells(ctx: OccupancyContext): OccCell[] {
+  const h = ctx.tiles.length;
+  const w = ctx.tiles[0]?.length ?? 0;
+  const out: OccCell[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (ctx.isOccupied({ x, y })) out.push({ x, y });
+    }
+  }
+  return out;
+}
+
+/**
+ * Relocate movers that sit on a chosen player→exit path when current
+ * occupants jointly seal every route. Unique-bridge reserve misses
+ * min-cut=2 (one summon per corridor).
+ */
+export function unsealProgressionOccupants(
+  movers: OccCell[],
+  tiles: boolean[][],
+  voidTiles: Set<string>,
+  portals: Set<string>,
+  start: OccCell,
+  ctx: OccupancyContext,
+): OccCell[] {
+  const impassable = ctx.barriers;
+  const occupants = [...collectOccupiedCells(ctx)];
+  for (const m of movers) {
+    const k = occKey(m.x, m.y);
+    if (!occupants.some((o) => occKey(o.x, o.y) === k)) occupants.push(m);
+  }
+  if (
+    !occupantsSealProgression(
+      tiles,
+      voidTiles,
+      portals,
+      start,
+      occupants,
+      impassable,
+    )
+  ) {
+    return movers;
+  }
+  // Relocate each mover onto a cell that restores some player→exit route.
+  // Sliding only off the shortest path missed a summon sitting on the
+  // longer of two corridors (min-cut=2) and ignored spell barriers that
+  // had already removed the short route.
+  const result = movers.map((m) => ({ x: m.x, y: m.y }));
+  const moverKeys = () => new Set(result.map((m) => occKey(m.x, m.y)));
+  const staticOccupants = occupants.filter(
+    (o) => !moverKeys().has(occKey(o.x, o.y)),
+  );
+  for (let i = 0; i < result.length; i++) {
+    const others = [...staticOccupants, ...result.filter((_, j) => j !== i)];
+    const trial = (cell: OccCell) => [...others, cell];
+    if (
+      !occupantsSealProgression(
+        tiles,
+        voidTiles,
+        portals,
+        start,
+        trial(result[i]),
+        impassable,
+      )
+    ) {
+      continue;
+    }
+    const avoid = new Set(
+      result.filter((_, j) => j !== i).map((m) => occKey(m.x, m.y)),
+    );
+    const found = findNearestFreeCell(
+      result[i],
+      ctx,
+      progressionSearchRadius(ctx),
+      avoid,
+      (cell) => {
+        return !occupantsSealProgression(
+          tiles,
+          voidTiles,
+          portals,
+          start,
+          trial(cell),
+          impassable,
+        );
+      },
+    );
+    if (found) result[i] = found;
+  }
+  return result;
+}
+
+/**
+ * Player-controlled summon move. AI `executeSummonAction` already slides
+ * off unique bridges and joint dual-path cuts. Canvas control used
+ * `findPath` + `updateCombatant` only, so a wolf on the only exit sealed
+ * the unlocked progression portal after a Boss Rush leftover (or mid-fight
+ * walk). Reject stacking on another combatant; then unseal like the AI path.
+ */
+export function resolveControlledSummonMoveDest(
+  from: OccCell,
+  dest: OccCell,
+  occupancyCtx: OccupancyContext,
+): OccCell | null {
+  if (from.x === dest.x && from.y === dest.y) return dest;
+  const movingCtx = occupancyVacating(occupancyCtx, from);
+  const destFree = isCellFree(dest, movingCtx);
+  if (!destFree) return null;
+  let next = dest;
+  const reserved =
+    occupancyCtx.progressStart && occupancyCtx.portals.size > 0
+      ? progressionReserved(movingCtx, occupancyCtx.progressStart)
+      : (occupancyCtx.reserved ?? new Set());
+  if (reserved.has(occKey(next.x, next.y))) {
+    const [slid] = relocateOffMandatoryCells([next], reserved, movingCtx);
+    next = slid;
+  }
+  const start = occupancyCtx.progressStart;
+  if (start && occupancyCtx.portals.size > 0) {
+    const [cut] = unsealProgressionOccupants(
+      [next],
+      occupancyCtx.tiles,
+      occupancyCtx.voidTiles,
+      occupancyCtx.portals,
+      start,
+      movingCtx,
+    );
+    next = cut;
+  }
+  return next;
+}
+
+/**
+ * Post-move landing used by AI summons and player-controlled walks.
+ * Player clicks used to write the raw destination and could sit on the
+ * only player→exit corridor (or jointly cut two 1-wide paths).
+ */
+export function resolveProgressionSafeOccupantCell(
+  dest: OccCell,
+  ctx: OccupancyContext,
+): OccCell {
+  let next = dest;
+  const reserved = ctx.reserved;
+  if (reserved?.has(occKey(next.x, next.y))) {
+    const [slid] = relocateOffMandatoryCells([next], reserved, ctx);
+    next = slid;
+  }
+  if (ctx.progressStart && ctx.portals.size > 0) {
+    const [cut] = unsealProgressionOccupants(
+      [next],
+      ctx.tiles,
+      ctx.voidTiles,
+      ctx.portals,
+      ctx.progressStart,
+      ctx,
+    );
+    next = cut;
+  }
+  return next;
 }
 
 export function relocateOffMandatoryCells(
@@ -204,7 +445,12 @@ export function relocateOffMandatoryCells(
       return { x: o.x, y: o.y };
     }
     const avoid = new Set<string>([...mandatory, ...placed]);
-    const next = findNearestFreeCell(o, ctx, 8, avoid);
+    const next = findNearestFreeCell(
+      o,
+      ctx,
+      progressionSearchRadius(ctx),
+      avoid,
+    );
     if (next) {
       placed.add(occKey(next.x, next.y));
       return next;
@@ -270,8 +516,11 @@ export function applyPushback(
 }
 
 function slideOffReserved(cell: OccCell, ctx: OccupancyContext): OccCell {
-  const reserved = ctx.reserved;
-  if (!reserved?.has(occKey(cell.x, cell.y))) return cell;
+  const reserved =
+    ctx.progressStart && ctx.portals.size > 0
+      ? progressionReserved(ctx)
+      : (ctx.reserved ?? new Set());
+  if (!reserved.has(occKey(cell.x, cell.y))) return cell;
   const [slid] = relocateOffMandatoryCells([cell], reserved, ctx);
   return slid;
 }

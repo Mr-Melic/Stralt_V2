@@ -5,12 +5,14 @@
  */
 
 import { WORLD_GRID_SIZE } from "../data/gameConstants.ts";
+import { findBattleStartCell } from "./battleStartPlacement.ts";
 import {
   BOSS_RUSH_PREFERRED_CELLS,
   MAP_ARCHETYPES,
   type Rng,
   applySanctuaryLayout,
   applyVoidTiles,
+  canPlaceWalkBlocker,
   createSeededRng,
   evaluateSolvability,
   finalizePlayableLayout,
@@ -20,6 +22,16 @@ import {
   resetFailedGenerationVoids,
   stampPortalTiles,
 } from "./mapGen.ts";
+import {
+  type OccCell,
+  type OccupancyContext,
+  collectMandatoryProgressionCells,
+  occKey,
+  occupantsSealProgression,
+  progressionReserved,
+  relocateOffMandatoryCells,
+  unsealProgressionOccupants,
+} from "./occupancy.ts";
 import {
   type DungeonChainSnapshot,
   type RunMode,
@@ -31,6 +43,7 @@ import {
   shouldArmDungeonChainOnRestExit,
   snapshotDungeonChain,
 } from "./portalRules.ts";
+import { spawnSummonUnit } from "./summonSpawn.ts";
 
 export type SimArchetype = (typeof MAP_ARCHETYPES)[number]["type"];
 
@@ -547,7 +560,13 @@ export function generateSeededRestMap(): SimWorld {
       restExitType: "dungeon",
       isDungeonEntry: true,
     },
-    { x: Math.floor(size / 2), y: size - 3, color: "boss", isRestExit: true },
+    {
+      x: Math.floor(size / 2),
+      y: size - 3,
+      color: "boss",
+      isRestExit: true,
+      restExitType: "boss",
+    },
   ];
   const center = Math.floor(size / 2);
   stampPortalTiles(tiles, portals);
@@ -573,11 +592,12 @@ export function generateSeededRestMap(): SimWorld {
   };
 }
 
-export function simulateRestExitEncounter(seed: number): SimWorld {
-  const rest = generateSeededRestMap();
-  const dungeonExit = rest.portals.find((p) => p.restExitType === "dungeon");
-  const arm = shouldArmDungeonChainOnRestExit(dungeonExit?.restExitType);
-  const depth = restExitSpawnDepth(dungeonExit?.restExitType);
+export function simulateRestExitEncounter(
+  seed: number,
+  restExitType = "dungeon",
+): SimWorld {
+  const arm = shouldArmDungeonChainOnRestExit(restExitType);
+  const depth = restExitSpawnDepth(restExitType);
   const world = generateSeededWorld({
     seed,
     runMode: arm ? "dungeon" : "none",
@@ -667,6 +687,43 @@ export function generateSeededSanctuary(seed: number): SimWorld {
   };
 }
 
+/** Boss-portal entry used to drop the boss at (11, 5) with no punch. */
+export function generateSeededBossPortalEncounter(seed: number): SimWorld {
+  const world = generateSeededWorld({
+    seed,
+    runMode: "none",
+    enemyCount: 0,
+  });
+  const mid = Math.floor(WORLD_GRID_SIZE / 2);
+  const bossCell = { x: mid + 3, y: mid - 3 };
+  const punched = punchRosterReachability(
+    world.tiles,
+    world.voidTiles,
+    [bossCell],
+    world.playerSpawn,
+    world.portals[0],
+    WORLD_GRID_SIZE,
+    WORLD_GRID_SIZE,
+  );
+  const finalized = finalizePlayableLayout({
+    tiles: punched.tiles,
+    voidTiles: world.voidTiles,
+    playerSpawn: punched.playerSpawn,
+    portals: world.portals,
+    spawns: punched.roster,
+    w: WORLD_GRID_SIZE,
+    h: WORLD_GRID_SIZE,
+    requireExit: true,
+  });
+  return {
+    ...world,
+    tiles: finalized.tiles,
+    portals: finalized.portals,
+    playerSpawn: finalized.playerSpawn,
+    spawns: finalized.spawns,
+  };
+}
+
 export function generateSeededDeathRealm(seed = 0): SimWorld {
   const rng = createSeededRng(seed);
   const size = WORLD_GRID_SIZE;
@@ -723,6 +780,95 @@ export function generateSeededDeathRealm(seed = 0): SimWorld {
   };
 }
 
+const SIM_SUMMON_SPELL = {
+  id: "summon-wolf",
+  name: "Summon Wolf",
+  summonUnitDef: { pieceType: "pawn" as const, level: 1 },
+  summonAI: "hunter",
+};
+
+/**
+ * Drop `count` summons onto a finalized world (enemy cells, then
+ * portal-adjacent floors). Spawn/unseal must leave a player→exit route.
+ */
+export function simulateSummonsOnWorld(
+  world: SimWorld,
+  count: number,
+): { sealed: boolean; cells: { x: number; y: number }[] } {
+  const tiles = world.tiles.map((row) => row.map((t) => t !== "wall"));
+  const portals = new Set(world.portals.map((p) => `${p.x},${p.y}`));
+  const occupied = new Set<string>([
+    `${world.playerSpawn.x},${world.playerSpawn.y}`,
+  ]);
+  const size = world.tiles[0]?.length ?? WORLD_GRID_SIZE;
+  const candidates: { x: number; y: number }[] = [];
+  for (const s of world.spawns) candidates.push({ x: s.x, y: s.y });
+  for (const p of world.portals) {
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const) {
+      const x = p.x + dx;
+      const y = p.y + dy;
+      if (x < 0 || y < 0 || x >= size || y >= size) continue;
+      if (world.tiles[y][x] === "wall") continue;
+      if (world.voidTiles.has(`${x},${y}`)) continue;
+      candidates.push({ x, y });
+    }
+  }
+  candidates.push({
+    x: Math.min(size - 1, world.playerSpawn.x + 1),
+    y: world.playerSpawn.y,
+  });
+  const cells: { x: number; y: number }[] = [];
+  const n = Math.max(0, Math.min(count, Math.max(candidates.length, 1)));
+  for (let i = 0; i < n; i++) {
+    const cell = candidates[i % Math.max(candidates.length, 1)] ?? {
+      x: world.playerSpawn.x,
+      y: world.playerSpawn.y,
+    };
+    const reserved = collectMandatoryProgressionCells(
+      tiles,
+      world.voidTiles,
+      portals,
+      world.playerSpawn,
+      new Set(),
+    );
+    const spawned = spawnSummonUnit(
+      cell,
+      SIM_SUMMON_SPELL,
+      "player",
+      1,
+      () => {},
+      () => ({ init: 4 }),
+      0,
+      {
+        tiles,
+        barriers: new Set(),
+        voidTiles: world.voidTiles,
+        portals,
+        reserved,
+        progressStart: world.playerSpawn,
+        isOccupied: (c) => occupied.has(`${c.x},${c.y}`),
+      },
+    );
+    occupied.add(`${spawned.summon.x},${spawned.summon.y}`);
+    cells.push({ x: spawned.summon.x, y: spawned.summon.y });
+  }
+  return {
+    sealed: occupantsSealProgression(
+      tiles,
+      world.voidTiles,
+      portals,
+      world.playerSpawn,
+      cells,
+    ),
+    cells,
+  };
+}
+
 export function reportWorld(
   world: SimWorld,
   opts?: { allowSpawnOnPortal?: boolean },
@@ -737,4 +883,250 @@ export function reportWorld(
     world.tiles.length,
     opts,
   );
+}
+
+/**
+ * Place a corpse/summon on every unique player→exit bridge, then relocate.
+ * Living leftovers on those cells permanently seal the unlocked portal.
+ */
+export function simulateCorpsesOnWorld(world: SimWorld): {
+  sealed: boolean;
+  cells: OccCell[];
+} {
+  const tiles = world.tiles.map((row) => row.map((t) => t !== "wall"));
+  const portals = new Set(world.portals.map((p) => `${p.x},${p.y}`));
+  const occupied = new Set<string>([
+    `${world.playerSpawn.x},${world.playerSpawn.y}`,
+  ]);
+  const ctx: OccupancyContext = {
+    tiles,
+    barriers: new Set(),
+    voidTiles: world.voidTiles,
+    portals,
+    progressStart: world.playerSpawn,
+    isOccupied: (c) => occupied.has(occKey(c.x, c.y)),
+  };
+  const mandatory = progressionReserved(ctx, world.playerSpawn);
+  if (mandatory.size === 0) {
+    return { sealed: false, cells: [] };
+  }
+  let offPath = 0;
+  const size = world.tiles[0]?.length ?? WORLD_GRID_SIZE;
+  for (let y = 0; y < world.tiles.length; y++) {
+    for (let x = 0; x < size; x++) {
+      const k = occKey(x, y);
+      if (mandatory.has(k) || portals.has(k)) continue;
+      if (k === `${world.playerSpawn.x},${world.playerSpawn.y}`) continue;
+      if (world.tiles[y][x] === "wall") continue;
+      if (world.voidTiles.has(k)) continue;
+      offPath += 1;
+    }
+  }
+  if (offPath === 0) {
+    return { sealed: false, cells: [] };
+  }
+  const ranked = [...mandatory]
+    .map((k) => {
+      const p = k.split(",");
+      const x = Number(p[0]);
+      const y = Number(p[1]);
+      return {
+        x,
+        y,
+        dist:
+          Math.abs(x - world.playerSpawn.x) + Math.abs(y - world.playerSpawn.y),
+      };
+    })
+    .sort((a, b) => b.dist - a.dist);
+  const corpses: OccCell[] = ranked
+    .slice(0, Math.min(ranked.length, Math.min(offPath, 4)))
+    .map((c) => ({ x: c.x, y: c.y }));
+  const moved = relocateOffMandatoryCells(corpses, mandatory, ctx);
+  const unsealed = unsealProgressionOccupants(
+    moved,
+    tiles,
+    world.voidTiles,
+    portals,
+    world.playerSpawn,
+    ctx,
+  );
+  return {
+    sealed: occupantsSealProgression(
+      tiles,
+      world.voidTiles,
+      portals,
+      world.playerSpawn,
+      unsealed,
+    ),
+    cells: unsealed,
+  };
+}
+
+/**
+ * Try to drop `count` walk-blockers (pillars/gates) on legal side cells.
+ * Cut-vertex candidates must be rejected so a corridor cannot seal the exit.
+ */
+export function simulateWalkBlockersOnWorld(
+  world: SimWorld,
+  count: number,
+): { placed: OccCell[]; rejectedCutVertices: number; ok: boolean } {
+  const w = world.tiles[0]?.length ?? WORLD_GRID_SIZE;
+  const h = world.tiles.length;
+  const placed: OccCell[] = [];
+  let rejectedCutVertices = 0;
+  const tiles = world.tiles.map((row) => row.slice());
+  const used = new Set<string>([
+    `${world.playerSpawn.x},${world.playerSpawn.y}`,
+    ...world.portals.map((p) => `${p.x},${p.y}`),
+    ...world.spawns.map((s) => `${s.x},${s.y}`),
+  ]);
+  for (let y = 0; y < h && placed.length < count; y++) {
+    for (let x = 0; x < w && placed.length < count; x++) {
+      const k = `${x},${y}`;
+      if (used.has(k)) continue;
+      if (tiles[y][x] === "wall") continue;
+      if (world.voidTiles.has(k)) continue;
+      const legal = canPlaceWalkBlocker(
+        tiles,
+        world.voidTiles,
+        world.playerSpawn,
+        world.portals,
+        world.spawns,
+        w,
+        h,
+        { x, y },
+      );
+      if (!legal) {
+        rejectedCutVertices += 1;
+        continue;
+      }
+      tiles[y][x] = "wall";
+      used.add(k);
+      placed.push({ x, y });
+    }
+  }
+  const report = evaluateSolvability(
+    tiles,
+    world.voidTiles,
+    world.playerSpawn,
+    world.portals,
+    world.spawns,
+    w,
+    h,
+  );
+  return { placed, rejectedCutVertices, ok: report.ok };
+}
+
+/**
+ * Replay WX battle-start destack (player ≥3, enemies ≥2) on a finalized
+ * world. Spacing used to scatter units onto a far island when the graph
+ * was still one component — still must stay solvable.
+ */
+export function simulateBattleStartOnWorld(world: SimWorld): {
+  playerSpawn: OccCell;
+  spawns: OccCell[];
+  ok: boolean;
+} {
+  const size = world.tiles[0]?.length ?? WORLD_GRID_SIZE;
+  const tiles = world.tiles.map((row) => row.map((t) => t !== "wall"));
+  const placed = new Set<string>();
+  for (const s of world.spawns) placed.add(`${s.x},${s.y}`);
+  const ctx: OccupancyContext = {
+    tiles,
+    barriers: new Set(),
+    voidTiles: world.voidTiles,
+    portals: new Set(world.portals.map((p) => `${p.x},${p.y}`)),
+    isOccupied: (c) => placed.has(occKey(c.x, c.y)),
+  };
+  const player =
+    findBattleStartCell(
+      world.playerSpawn,
+      world.spawns.map((s) => ({ x: s.x, y: s.y, minDist: 3 })),
+      3,
+      ctx,
+    ) ?? world.playerSpawn;
+  placed.add(`${player.x},${player.y}`);
+  const nextSpawns: OccCell[] = [];
+  for (const s of world.spawns) {
+    const avoid: { x: number; y: number; minDist: number }[] = [
+      { x: player.x, y: player.y, minDist: 3 },
+    ];
+    for (const key of placed) {
+      const p = key.split(",");
+      avoid.push({ x: Number(p[0]), y: Number(p[1]), minDist: 2 });
+    }
+    const cell = findBattleStartCell({ x: s.x, y: s.y }, avoid, 2, ctx) ?? {
+      x: s.x,
+      y: s.y,
+    };
+    placed.add(`${cell.x},${cell.y}`);
+    nextSpawns.push(cell);
+  }
+  const report = evaluateSolvability(
+    world.tiles,
+    world.voidTiles,
+    player,
+    world.portals,
+    nextSpawns,
+    size,
+    world.tiles.length,
+  );
+  return { playerSpawn: player, spawns: nextSpawns, ok: report.ok };
+}
+
+const WANDER_DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const;
+
+/**
+ * Replay overworld wander on the finalized graph. Enemies used to step onto
+ * leftover CA crumbs (still floor, outside the spawn flood); battle then
+ * started on an island and sealed every exit. After seal they must stay
+ * engageable.
+ */
+export function simulateEnemyWanderOnWorld(
+  world: SimWorld,
+  steps: number,
+  rng: Rng,
+): { spawns: { x: number; y: number }[]; ok: boolean } {
+  const size = world.tiles[0]?.length ?? WORLD_GRID_SIZE;
+  const portals = new Set(world.portals.map((p) => `${p.x},${p.y}`));
+  const occupied = new Set<string>([
+    `${world.playerSpawn.x},${world.playerSpawn.y}`,
+  ]);
+  const walk = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= size || y >= world.tiles.length) return false;
+    if (world.tiles[y][x] === "wall") return false;
+    const k = `${x},${y}`;
+    if (world.voidTiles.has(k) || portals.has(k)) return false;
+    return true;
+  };
+  const spawns = world.spawns.map((s) => ({ x: s.x, y: s.y }));
+  for (const s of spawns) occupied.add(`${s.x},${s.y}`);
+  for (const s of spawns) {
+    occupied.delete(`${s.x},${s.y}`);
+    for (let i = 0; i < steps; i++) {
+      const d = WANDER_DIRS[Math.floor(rng() * WANDER_DIRS.length)];
+      const nx = s.x + d[0];
+      const ny = s.y + d[1];
+      const k = `${nx},${ny}`;
+      if (!walk(nx, ny) || occupied.has(k)) continue;
+      s.x = nx;
+      s.y = ny;
+    }
+    occupied.add(`${s.x},${s.y}`);
+  }
+  const report = evaluateSolvability(
+    world.tiles,
+    world.voidTiles,
+    world.playerSpawn,
+    world.portals,
+    spawns,
+    size,
+    world.tiles.length,
+  );
+  return { spawns, ok: report.ok };
 }

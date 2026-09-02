@@ -5,6 +5,8 @@ import {
   liveDokaForShopSpend,
   liveShopWallet,
   shouldAllowShopSpend,
+  shouldRollbackFailedShopSpend,
+  tryConsumeBuffItem,
   tryPurchaseBuffItem,
 } from "../utils/itemShop";
 
@@ -225,7 +227,14 @@ const BuffShop: React.FC<BuffShopProps> = ({
       };
       void Promise.resolve(onDeductDoka(item.cost)).then((ok) => {
         if (ok === false) {
-          liveWalletRef.current += item.cost;
+          if (
+            shouldRollbackFailedShopSpend({
+              liveDoka: liveWalletRef.current,
+              expectedDoka: purchase.nextWallet,
+            })
+          ) {
+            liveWalletRef.current += item.cost;
+          }
           inventoryRef.current = {
             ...inventoryRef.current,
             [item.id]: Math.max(0, purchase.nextOwned - 1),
@@ -244,15 +253,19 @@ const BuffShop: React.FC<BuffShopProps> = ({
   const handleUse = useCallback(
     (itemId: BuffItemType) => {
       if (!inBattle || !isPlayerTurn) return;
-      const count = inventory[itemId] ?? 0;
-      if (count <= 0) return;
+      const nextOwned = tryConsumeBuffItem(inventoryRef.current[itemId] ?? 0);
+      if (nextOwned == null) return;
+      inventoryRef.current = {
+        ...inventoryRef.current,
+        [itemId]: nextOwned,
+      };
       onUseItem(itemId);
-      setInventory((prev) => {
-        const next = prev[itemId] ? prev[itemId]! - 1 : 0;
-        return { ...prev, [itemId]: Math.max(0, next) };
-      });
+      setInventory((prev) => ({
+        ...prev,
+        [itemId]: nextOwned,
+      }));
     },
-    [inventory, inBattle, isPlayerTurn, onUseItem],
+    [inBattle, isPlayerTurn, onUseItem],
   );
 
   const totalItems = BUFF_ITEMS.reduce(
@@ -289,7 +302,7 @@ const BuffShop: React.FC<BuffShopProps> = ({
         className="stone-frame"
         style={{
           width: "min(520px, 94vw)",
-          maxHeight: "80vh",
+          maxHeight: "min(80vh, 80dvh)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -308,7 +321,7 @@ const BuffShop: React.FC<BuffShopProps> = ({
             data-ocid="buff_shop.close_button"
             onClick={onClose}
             aria-label="Close shop"
-            className="stone-btn-slate"
+            className="stone-btn-slate stone-modal-close"
             style={{
               width: 30,
               height: 30,

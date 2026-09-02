@@ -1,0 +1,75 @@
+{
+  "$comment": "Runtime upgrade proof for scripts/eop-upgrade-matrix.mjs. Each path installs the first commit's backend wasm on a fresh PocketIC canister, upgrades through the remaining commits in order, then upgrades to the current working tree. Commits are built with `mops build` at that commit. `expect` is `ok` or `fail`. f8aa05e = PR #181 merge = the 2026-08-31 Caffeine import whose signature Caffeine holds as the previous version (.old).",
+  "paths": [
+    {
+      "name": "zh6cg-aaaaa-aaaad-aar2q-cai per Caffeine's previous-version record: 2026-08-31 import (PR #181 f8aa05e, latest applied 20260831 WITHOUT GameKey)",
+      "commits": ["f8aa05e"],
+      "expect": "ok"
+    },
+    {
+      "name": "Caffeine placeholder (empty) then the 2026-08-31 import",
+      "commits": ["empty", "f8aa05e"],
+      "expect": "ok"
+    },
+    {
+      "name": "cwofb-yqaaa-aaaap-qp45q-cai: Caffeine #340 -> #347 -> #348 -> #354",
+      "commits": ["cfe614b", "31feee5", "214fc41", "10d44dd"],
+      "expect": "ok"
+    },
+    {
+      "name": "cwofb-yqaaa-aaaap-qp45q-cai stuck at Caffeine #348 (latest applied 20260803_185500)",
+      "commits": ["cfe614b", "31feee5", "214fc41"],
+      "expect": "ok"
+    },
+    {
+      "name": "Caffeine #354 then the 2026-08-31 import (import applied onto the original canister)",
+      "commits": ["cfe614b", "31feee5", "214fc41", "10d44dd", "f8aa05e"],
+      "expect": "ok"
+    },
+    {
+      "name": "main between PR #259 and #309, fresh install (latest applied 20260901)",
+      "commits": ["1d5395a"],
+      "expect": "ok"
+    },
+    {
+      "name": "PR #309 main, fresh install",
+      "commits": ["eb03bdc"],
+      "expect": "ok"
+    },
+    {
+      "name": "2026-08-31 import -> PR #259 -> PR #309 (had those deploys succeeded)",
+      "commits": ["f8aa05e", "1d5395a", "eb03bdc"],
+      "expect": "ok"
+    },
+    {
+      "name": "PR #311 main, fresh install (20260901 name-only, GameKey on 20260831)",
+      "commits": ["d8b8f35"],
+      "expect": "ok"
+    },
+    {
+      "name": "empty canister (fresh Caffeine project)",
+      "commits": ["empty"],
+      "expect": "ok"
+    },
+    {
+      "name": "REGRESSION: 2026-08-31 shape upgraded with PR #258 (GameKey stuffed into the applied 20260831) — traps `stable variable … not found in persisted state`; static check-stable passed",
+      "commits": ["f8aa05e", "58302bc"],
+      "expect": "fail"
+    },
+    {
+      "name": "REGRESSION: 2026-08-31 shape upgraded with PR #311 main (what Caffeine's compile-time M0263 prevented)",
+      "commits": ["f8aa05e", "d8b8f35"],
+      "expect": "fail"
+    },
+    {
+      "name": "UNSUPPORTED: PR #258 fresh install (GameKey on the applied 20260831) — no Caffeine deploy of it succeeded; bridge through origin/main@d8b8f35 first",
+      "commits": ["58302bc"],
+      "expect": "fail"
+    },
+    {
+      "name": "UNSUPPORTED: Caffeine #340 legacy actor, no chain",
+      "commits": ["cfe614b"],
+      "expect": "fail"
+    }
+  ]
+}

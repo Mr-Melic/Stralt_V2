@@ -329,6 +329,7 @@ const EnemyRegister: React.FC<EnemyRegisterProps> = ({ isOpen, onClose }) => {
             type="button"
             data-ocid="enemy_register.close_button"
             onClick={onClose}
+            className="stone-modal-close"
             style={{
               background: "transparent",
               border: "1px solid #7a1111",
@@ -368,7 +369,7 @@ const EnemyRegister: React.FC<EnemyRegisterProps> = ({ isOpen, onClose }) => {
               border: "1px solid #551111",
               borderRadius: 4,
               color: "#ffcccc",
-              fontSize: 13,
+              fontSize: 16,
               padding: "7px 12px",
               outline: "none",
             }}

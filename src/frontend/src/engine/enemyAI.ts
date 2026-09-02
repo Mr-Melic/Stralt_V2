@@ -40,10 +40,17 @@ import {
 } from "../data/gameConstants.ts";
 import type { ChessPieceType, Enemy, SpellConfig } from "../types/gameTypes";
 import { logDebugInfo } from "../utils/debugLogger.ts";
+import { enemyWalkCostPerTile } from "./enemyWalkMp.ts";
 import {
   type OccupancyContext,
   isCellFree as sharedIsCellFree,
 } from "./occupancy.ts";
+import {
+  chebyshevOnBoard as chebyshev,
+  enemyCastGeometryOk,
+  enemySpellRange,
+  enemySpellRequiresLos,
+} from "./targeting.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -218,8 +225,9 @@ function inferSummonArchetype(summon: AICombatant): SummonArchetype {
 }
 
 /**
- * Context handed to `decideEnemyAction`. Mirrors the SpellContext shape used
- * by `handleSummonTurn` in engine/summonAI.ts: pure callbacks, no React.
+ * Context handed to `decideEnemyAction`. Mirrors the SpellContext shape
+ * used by the live summon path in enemyAI / summonExecutor: pure callbacks,
+ * no React. `engine/summonAI.ts` `runSummonAI` is unused.
  *
  * The WX call site is responsible for wiring every field to live state/refs.
  * `decideEnemyAction` only reads; it never mutates `enemy` or `ctx`.
@@ -255,6 +263,12 @@ export interface DecideEnemyContext {
   enrageMultiplier: number;
   /** True if the slime-flood flag is active (doubles per-tile path cost). */
   isSlimeFlood: boolean;
+  /**
+   * Frozen Terrain uses the same onMpCost doubler as Slime Flood. The
+   * player BFS already pays 2 MP/tile; omitting this left AI reachable
+   * at cost 1 on Frozen maps.
+   */
+  isFrozenTerrain?: boolean;
   /** Deterministic RNG function (Math.random by default). */
   rng: () => number;
   /** Effective-stat lookup: returns the post-modifier value for a stat. */
@@ -303,8 +317,18 @@ function key(x: number, y: number): string {
   return `${x},${y}`;
 }
 
-function chebyshev(a: AICell, b: AICell): number {
-  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+function aiCanCast(
+  origin: AICell,
+  target: AICell,
+  spell: SpellConfig,
+  ctx: DecideEnemyContext,
+): boolean {
+  return enemyCastGeometryOk({
+    origin,
+    target,
+    spell,
+    hasLoS: ctx.hasLineOfSight(origin, target),
+  });
 }
 
 /** HP fraction clamped to [0,1]. */
@@ -320,8 +344,8 @@ function effectiveHp(c: AICombatant): number {
 
 /**
  * BFS reachable tiles from the enemy's position, respecting the step budget
- * and per-tile cost (slime flood doubles cost). Mirrors the inline
- * `reachableTilesAI` computation in the original WX region.
+ * and per-tile cost (Slime Flood / Frozen Terrain each double). Mirrors the
+ * inline `reachableTilesAI` computation in the original WX region.
  *
  * Uses the shared `isCellFree` from engine/occupancy.ts for the passability
  * check on each neighbor, so grid walls, barriers, portals, void tiles, and
@@ -338,7 +362,10 @@ function computeReachable(
     { x: origin.x, y: origin.y, steps: 0 },
   ];
   visited.set(key(origin.x, origin.y), 0);
-  const costPerTile = ctx.isSlimeFlood ? 2 : 1;
+  const costPerTile = enemyWalkCostPerTile({
+    slimeFlood: ctx.isSlimeFlood,
+    frozenTerrain: ctx.isFrozenTerrain === true,
+  });
   const dirs = [
     { x: 1, y: 0 },
     { x: -1, y: 0 },
@@ -423,13 +450,13 @@ function inferArchetype(ctx: DecideEnemyContext): EnemyArchetype {
     (s) => s.spellType === "heal" || (s.healAmount ?? 0) > 0,
   );
   if (hasHeal) return "healer";
-  const ranged = spells.filter((s) => Number(s.range) > 1);
-  const melee = spells.filter((s) => Number(s.range) <= 1);
+  const ranged = spells.filter((s) => enemySpellRange(s) > 1);
+  const melee = spells.filter((s) => enemySpellRange(s) <= 1);
   // Caster: majority ranged attack spells with LoS expectation.
   if (
     ranged.length > 0 &&
     ranged.length >= melee.length &&
-    ranged.some((s) => s.lineOfSight !== false)
+    ranged.some((s) => enemySpellRequiresLos(s))
   ) {
     return "caster";
   }
@@ -534,7 +561,7 @@ function pickBestDamageSpell(
   const inRange = ctx.availableSpells.filter(
     (s) =>
       Number(s.damage) > 0 &&
-      Number(s.range) >= dist &&
+      enemySpellRange(s) >= dist &&
       (s.spellType === "damage" ||
         s.effectType === "damage" ||
         s.effectType === "drain"),
@@ -734,10 +761,8 @@ function repositionForLOS(
     const next = stepToward(cur, target, ctx, reachable);
     if (next.x === cur.x && next.y === cur.y) break;
     cur = next;
-    if (ctx.hasLineOfSight(cur, target)) {
-      // Confirm the target is still in spell range from this tile.
-      const dist = chebyshev(cur, target);
-      if (dist <= Number(spell.range)) return cur;
+    if (aiCanCast(cur, target, spell, ctx)) {
+      return cur;
     }
   }
   return null;
@@ -766,10 +791,8 @@ function findNearestLegalCastTile(
   reachable: Set<string>,
   spell: SpellConfig,
 ): AICell | null {
-  const range = Number(spell.range);
-  const needsLos = spell.lineOfSight !== false;
   // BFS from the origin over reachable tiles, ordered by step count. The
-  // `reachable` set already encodes the per-tile step cost (slime-flood aware),
+  // `reachable` set already encodes the per-tile step cost (Slime/Frozen),
   // so the first legal-cast tile we hit is the nearest by movement budget.
   const dirs = [
     { x: 1, y: 0 },
@@ -784,11 +807,8 @@ function findNearestLegalCastTile(
   const queue: AICell[] = [origin];
   while (queue.length > 0) {
     const cur = queue.shift()!;
-    const dist = chebyshev(cur, target);
-    if (dist <= range) {
-      if (!needsLos || ctx.hasLineOfSight(cur, target)) {
-        return cur;
-      }
+    if (aiCanCast(cur, target, spell, ctx)) {
+      return cur;
     }
     for (const d of dirs) {
       const nx = cur.x + d.x;
@@ -929,10 +949,8 @@ function decideCaster(
     const spell = pickBestDamageSpell(ctx, t.combatant);
     if (!spell) continue;
     const targetCell = { x: t.combatant.x, y: t.combatant.y };
-    const dist = chebyshev(origin, targetCell);
-    const inRange = dist <= Number(spell.range);
-    const los = ctx.hasLineOfSight(origin, targetCell);
-    if (inRange && los) {
+    const inRange = chebyshev(origin, targetCell) <= enemySpellRange(spell);
+    if (aiCanCast(origin, targetCell, spell, ctx)) {
       // Section 4(a): prefer a target that dies this turn when lookahead is on.
       const lethal = applyLethalLookahead(scored, ctx, spell);
       const final = applyOverkillSpread(lethal, scored, ctx, spell);
@@ -952,7 +970,7 @@ function decideCaster(
       };
     }
     // Section 4(c): in range but LoS blocked — reposition for a clear shot.
-    if (inRange && !los) {
+    if (inRange && enemySpellRequiresLos(spell)) {
       const reposition = repositionForLOS(
         origin,
         targetCell,
@@ -1079,7 +1097,7 @@ function decideHealer(
   );
   if (wounded && healSpell) {
     const dist = chebyshev(origin, { x: wounded.x, y: wounded.y });
-    if (dist <= Number(healSpell.range)) {
+    if (dist <= enemySpellRange(healSpell)) {
       ctx.log(`${ctx.enemy.pieceType} heals ${wounded.name}`, HEAL_COLOR);
       logIntent("healer", "heal", wounded.id, "wounded-ally-in-range");
       return {
@@ -1513,12 +1531,8 @@ function decideGeneric(
   const dist = chebyshev(origin, targetCell);
   // Try a ranged spell first.
   const spell = pickBestDamageSpell(ctx, target.combatant);
-  if (spell && dist <= Number(spell.range)) {
-    const los =
-      spell.lineOfSight === false
-        ? true
-        : ctx.hasLineOfSight(origin, targetCell);
-    if (los) {
+  if (spell && dist <= enemySpellRange(spell)) {
+    if (aiCanCast(origin, targetCell, spell, ctx)) {
       // Section 4(a): prefer a target that dies this turn when lookahead is on.
       const lethal = applyLethalLookahead(scored, ctx, spell);
       const final = applyOverkillSpread(lethal, scored, ctx, spell);
@@ -1923,12 +1937,8 @@ function decideSummonHunter(
   const targetCell = { x: target.combatant.x, y: target.combatant.y };
   const dist = chebyshev(origin, targetCell);
   // Prefer venom strike when in range; fall back to physical_attack (melee).
-  if (venom && dist <= Number(venom.range)) {
-    const los =
-      venom.lineOfSight === false
-        ? true
-        : ctx.hasLineOfSight(origin, targetCell);
-    if (los) {
+  if (venom && dist <= enemySpellRange(venom)) {
+    if (aiCanCast(origin, targetCell, venom, ctx)) {
       const lethal = applyLethalLookahead(scored, ctx, venom);
       ctx.log(
         `${summon.pieceType} venom-strikes ${lethal.combatant.name}!`,
@@ -2119,7 +2129,7 @@ function decideSummonGuardian(
   if (shield && ward) {
     const wardCell = { x: ward.x, y: ward.y };
     const dist = chebyshev(origin, wardCell);
-    const inRange = dist <= Number(shield.range);
+    const inRange = dist <= enemySpellRange(shield);
     if (inRange) {
       ctx.log(`${summon.pieceType} shields ${ward.name}`, HEAL_COLOR);
       logIntent("guardian", "cast", ward.id, "starter-shield");
@@ -2240,12 +2250,8 @@ function decideSummonArcher(
   const target = scored[0];
   const targetCell = { x: target.combatant.x, y: target.combatant.y };
   const dist = chebyshev(origin, targetCell);
-  if (preferred && dist <= Number(preferred.range)) {
-    const los =
-      preferred.lineOfSight === false
-        ? true
-        : ctx.hasLineOfSight(origin, targetCell);
-    if (los) {
+  if (preferred && dist <= enemySpellRange(preferred)) {
+    if (aiCanCast(origin, targetCell, preferred, ctx)) {
       ctx.log(
         `${summon.pieceType} looses an arrow at ${target.combatant.name}!`,
         CAST_COLOR,
@@ -2292,34 +2298,26 @@ function decideSummonArcher(
   // targetType "enemy" (range 3); the resolved spell object + target id
   // satisfy the executor gate at summonExecutor.ts line 123.
   if (slow) {
-    const slowRange = Number(slow.range);
     const slowScored = scoreTargets(opponents, ctx, slow);
     const slowTarget = slowScored[0];
     if (slowTarget) {
       const slowCell = { x: slowTarget.combatant.x, y: slowTarget.combatant.y };
-      const slowDist = chebyshev(origin, slowCell);
-      if (slowDist <= slowRange) {
-        const slowLos =
-          slow.lineOfSight === false
-            ? true
-            : ctx.hasLineOfSight(origin, slowCell);
-        if (slowLos) {
-          ctx.log(
-            `${summon.pieceType} slows approaching ${slowTarget.combatant.name}`,
-            CAST_COLOR,
-          );
-          logIntent("archer", "cast", slowTarget.combatant.id, "spell-slow");
-          return {
-            archetype: "generic",
-            destination: origin,
-            spell: slow,
-            targetId: slowTarget.combatant.id,
-            kind: "cast",
-            intent: "slow-approaching",
-            intentColor: CAST_COLOR,
-            retreating: false,
-          };
-        }
+      if (aiCanCast(origin, slowCell, slow, ctx)) {
+        ctx.log(
+          `${summon.pieceType} slows approaching ${slowTarget.combatant.name}`,
+          CAST_COLOR,
+        );
+        logIntent("archer", "cast", slowTarget.combatant.id, "spell-slow");
+        return {
+          archetype: "generic",
+          destination: origin,
+          spell: slow,
+          targetId: slowTarget.combatant.id,
+          kind: "cast",
+          intent: "slow-approaching",
+          intentColor: CAST_COLOR,
+          retreating: false,
+        };
       }
     }
   }
@@ -2409,7 +2407,7 @@ function decideSummonBomber(
     const centerCell = { x: bestCenter.x, y: bestCenter.y };
     const dist = chebyshev(origin, centerCell);
     // Detonate when the cluster center is within cast range.
-    if (dist <= Number(inferno.range)) {
+    if (dist <= enemySpellRange(inferno)) {
       ctx.log(
         `${summon.pieceType} detonates Inferno on ${bestCount} foes!`,
         CAST_COLOR,
@@ -2486,7 +2484,7 @@ function decideSummonHealer(
   const wounded = pickBestAlly(woundedCandidates, summon, "healer", "heal");
   if (wounded && healSpell) {
     const dist = chebyshev(origin, { x: wounded.x, y: wounded.y });
-    if (dist <= Number(healSpell.range)) {
+    if (dist <= enemySpellRange(healSpell)) {
       ctx.log(`${summon.pieceType} heals ${wounded.name}`, HEAL_COLOR);
       logIntent("healer", "heal", wounded.id, "wounded-ally-in-range");
       return {
@@ -2529,7 +2527,7 @@ function decideSummonHealer(
   const ward = pickBestAlly(allies, summon, "healer", "rally");
   if (rallySpell && ward) {
     const dist = chebyshev(origin, { x: ward.x, y: ward.y });
-    if (dist <= Number(rallySpell.range)) {
+    if (dist <= enemySpellRange(rallySpell)) {
       ctx.log(`${summon.pieceType} rallies ${ward.name}`, HEAL_COLOR);
       logIntent("healer", "cast", ward.id, "rallying-cry");
       return {

@@ -1,5 +1,7 @@
 // EXP8: Dungeon chain state hook — state lives in WorldExploration for stable
 // canvas-ref access; this hook provides the type shape for external consumers.
+import { dungeonDokaMultiplierFor } from "../engine/portalRules.ts";
+
 export interface DungeonChainState {
   isActive: boolean;
   depth: number;
@@ -7,18 +9,13 @@ export interface DungeonChainState {
   dokaMultiplier: number;
 }
 
-export const DUNGEON_DOKA_MULTIPLIERS: Record<number, number> = {
-  0: 1,
-  1: 1.5,
-  2: 2.0,
-  3: 2.5,
-  4: 3.0,
-  5: 4.0,
-};
-
-/** Returns a Doka multiplier for the given dungeon depth (0 = normal map). */
+/**
+ * Active-run Doka multiplier for a dungeon depth (0 = 1x).
+ * Delegates to `dungeonDokaMultiplierFor` so HUD helpers cannot drift
+ * from the victory persist table.
+ */
 export function getDungeonMultiplier(depth: number): number {
-  return DUNGEON_DOKA_MULTIPLIERS[Math.min(depth, 5)] ?? 1;
+  return dungeonDokaMultiplierFor(true, depth);
 }
 
 // Legacy stub kept for safe imports

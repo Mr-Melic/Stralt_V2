@@ -162,6 +162,16 @@ void (async () => {
   assert.deepEqual(unseededClaim, { ok: 100 });
   assert.equal(unseeded.isWalletSeeded(), false);
   assert.equal(unseeded.snapshot().doka, 0);
+  unseeded.hydrateWhenIdle(
+    { doka: 500, xp: 80, level: 4 },
+    { walletReady: true },
+  );
+  assert.equal(
+    unseeded.isWalletSeeded(),
+    false,
+    "stale pre-claim query must not seed after unseeded #ok",
+  );
+  assert.equal(unseeded.snapshot().doka, 0);
   const afterClaimAndHeal = createProgressPersist({
     doka: 720,
     xp: 50,

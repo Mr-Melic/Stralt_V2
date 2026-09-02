@@ -1,0 +1,46 @@
+# Actor-level stables on main.mo that persist orthogonally (not listed
+# on the latest field-introducing NewActor, 20260901_000000). Frozen.
+# Do not add names here. New persistent let/var must appear on a later
+# NewActor instead.
+accessControlState
+userProfiles
+characterSlots
+enemyConfigs
+regionConfigs
+playerSpriteConfigs
+adminAuditLog
+levelUpConfig
+levelUpConfigPrev
+hasLevelUpConfigPrev
+spellConfigs
+mapModifierConfigs
+roleChangeTimestamps
+shopPackages
+achievementConfigs
+achievementProgress
+purchaseRecords
+nextPurchaseId
+bannedPrincipals
+gameConfig
+gameConfigPrev
+hasGameConfigPrev
+tierSpawnConfig
+tierSpawnConfigPrev
+hasTierSpawnConfigPrev
+colorPaletteStore
+colorPalettePrev
+hasColorPalettePrev
+bossRushConfigStore
+bossRushConfigPrev
+hasBossRushConfigPrev
+appVersion
+changelogs
+changelogShownVersions
+enemyNames
+buffInventories
+dungeonRecords
+bossConfigs
+bossPortalAssignments
+dokaBalances
+bossRushStates
+adBoxes

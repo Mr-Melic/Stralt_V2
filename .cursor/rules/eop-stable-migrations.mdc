@@ -1,0 +1,92 @@
+---
+description: Motoko EOP migration chain must match the names and shapes Caffeine recorded; .old is Caffeine-owned
+alwaysApply: true
+---
+
+# Enhanced orthogonal persistence (EOP) migrations
+
+`mops.toml` `[canisters.backend.migrations] chain = "src/backend/migrations"` makes
+`mops build` / `mops check` pass `--enhanced-migration=src/backend/migrations` to
+moc. Caffeine (local CLI **and** the GitHub import) runs exactly `mops build` and
+`mops check` from the repo root (`src/backend/caffeine.toml`), so the chain IS
+what gets deployed even though `src/backend/main.mo` is a plain `actor {`.
+
+## `.old/src/backend/dist/backend.most` is Caffeine-owned
+
+- Caffeine keeps its **own** copy of the previous version: the
+  `src/backend/dist/backend.most` of the last build it deployed successfully.
+  Its `mops check` compares against that copy, not against the `.old` in the
+  repo (PR #311 committed an `.old` with GameKey; Caffeine still failed M0263
+  for GameKey). `caffeine projects clone` writes that stored file to `.old/`.
+- For this project the record is the 2026-08-31 import = PR #181 merge
+  `f8aa05e`: chain `20260826/20260827/20260831`, 42 stables, **no GameKey**.
+  The repo's `.old` is a byte-identical copy so `mops check` behaves like
+  Caffeine's: it must fail on M0263 exactly like Caffeine did for the #311 chain
+  and pass for the current one.
+- Never blank it (PR #177), never hand-write it (PR #311). Replace it only with
+  the byte-identical `.most` of a build Caffeine actually deployed, and add the
+  same file under `src/backend/migrations/snapshots/deployed/`
+  (`check-eop-stables.py` requires the match).
+
+## How moc resolves the chain (moc 1.11.2, verified in source + PocketIC)
+
+1. **Runtime** (`src/lowering/desugar.ml`): the canister stores the names of
+   the migrations it applied. The new program compares the *most recently
+   applied* name with each chain file name; that file is the position, the
+   stored state is loaded as the chain type there and every later file runs.
+   No match → the whole chain runs from the genesis input `{}` →
+   `RTS error: Memory-incompatible program upgrade` (IC0503).
+2. **Compile time** (`mo_types/type.ml` `pre`/`post`; `mops check-stable`):
+   position = last name in the previous `.most` chain block. Every actor field
+   that no later chain file produces is a **required input** at that position
+   (M0263 when the previous version lacks it); a previous field no later file
+   consumes and the actor no longer declares is dropped (M0169).
+3. The built wasm does **not** depend on `.old` (identical md5 with a blank,
+   wrong or real baseline). `.old` only feeds `mops check-stable`.
+4. False negative: previous version already at the head of the new chain →
+   moc marks nothing required → check passes, runtime traps
+   `stable variable … not found in persisted state` (2026-08-31 → PR #258).
+   `python3 scripts/check-eop-stables.py` applies the runtime rule instead.
+
+Consequences:
+
+- Never put a new stable on a chain file at or **before** the deployed position
+  (`20260831_000000` carries no GameKey; GameKey is `20260901_000000`).
+- Never delete or rename a chain file whose name a canister recorded
+  (`20260803_185500`, `20260827_000000`, `20260831_000000`, `20260901_000000`).
+  A `public func migration(_ : {}) : {} { {} }` no-op keeps the name.
+- Never change a frozen `NewActor` (through `20260901_000000`).
+- The genesis file must sort before every recorded name: `20260801_000000.mo`,
+  `OldActor = {}` (its own name never matters: it is never the head).
+- Two canisters with the same latest name but different field sets cannot both
+  be served by one chain. The PR #258 shape (GameKey on `20260831`) is
+  documented as unsupported; bridge it through `origin/main@d8b8f35` first.
+
+## Adding a persistent `let`/`var` on `main.mo`
+
+1. Add a **new** lexically later file `src/backend/migrations/YYYYMMDD_HHMMSS.mo`
+   (after `20260901_000000`). `OldActor = {}` for pure additions (only list the
+   fields you transform); `NewActor` = the new fields with empty-map / zero
+   defaults.
+2. Bump `mops.toml` `check-limit` to the number of chain files.
+3. `python3 scripts/check-eop-stables.py` must pass (regenerate manifests only
+   with `--write-manifests` when *bootstrapping* a new frozen file).
+4. Run the gate:
+
+```bash
+bash scripts/caffeine-import-gate.sh backend        # eop checker, mops check vs .old, deployed snapshots
+node scripts/eop-upgrade-matrix.mjs                  # PocketIC runtime proof when pocket-ic is available
+```
+
+## Baselines
+
+- `.old/src/backend/dist/backend.most` = Caffeine's previous version (above).
+- `src/backend/migrations/snapshots/deployed/*.most` = every other recorded
+  shape (check-stable must pass); `snapshots/unsupported/*.most` = documented
+  limits (must fail); `snapshots/empty-canister.most` = fresh import.
+  See `snapshots/README.md`.
+- Static `mops check-stable` is necessary but not sufficient. PocketIC is the
+  proof.
+
+Do not delete needed stables from `main.mo` to "make upgrade work." CharacterStats
+stays 12 fields.

@@ -1,0 +1,655 @@
+// Version: 4.0.0
+// Snapshot: Caffeine build #348 tail (latest applied 20260803_185500). Original canister cwofb-yqaaa-aaaap-qp45q-cai if #354 never deployed.
+// Built from git 214fc41 with moc 1.11.2 exactly as `mops build` does (see snapshots/README.md).
+type AccessControlState__45017055 =
+  {
+    var adminAssigned : Bool;
+    userRoles : Map__246123559<Principal, UserRole__1073662873>
+  };
+type AchievementConfig__371522003 =
+  {
+    active : Bool;
+    condition : Text;
+    description : Text;
+    dokaReward : Nat;
+    id : Text;
+    name : Text
+  };
+type AchievementConfig__943077584 =
+  {
+    active : Bool;
+    condition : Text;
+    description : Text;
+    dokaReward : Nat;
+    id : Text;
+    name : Text
+  };
+type AchievementProgress__1034666012 =
+  {
+    achievementId : Text;
+    claimed : Bool;
+    principalId : Text;
+    unlocked : Bool;
+    unlockedAt : Int
+  };
+type AchievementProgress__592946033 =
+  {
+    achievementId : Text;
+    claimed : Bool;
+    principalId : Text;
+    unlocked : Bool;
+    unlockedAt : Int
+  };
+type BattleEffect__485425701 =
+  {
+    description : Text;
+    effectType : {#buff; #damage; #debuff};
+    id : Text;
+    name : Text;
+    value : Int
+  };
+type BattleEffect__669342150 =
+  {
+    description : Text;
+    effectType : {#buff; #damage; #debuff};
+    id : Text;
+    name : Text;
+    value : Int
+  };
+type BossConfig__765161734 =
+  {
+    adminNotes : Text;
+    baseStats : BossStats__498679054;
+    bossMapColor : Text;
+    defeated : Bool;
+    id : Text;
+    name : Text;
+    phase1 : BossPhaseConfig__698600719;
+    phase2 : BossPhaseConfig__698600719;
+    pieceType : Text;
+    portalColor : Text;
+    rewardDokaMultiplier : Float;
+    rewardXpMultiplier : Float
+  };
+type BossConfig__946198359 =
+  {
+    adminNotes : Text;
+    baseStats : BossStats__777147753;
+    bossMapColor : Text;
+    defeated : Bool;
+    id : Text;
+    name : Text;
+    phase1 : BossPhaseConfig__423122238;
+    phase2 : BossPhaseConfig__423122238;
+    pieceType : Text;
+    portalColor : Text;
+    rewardDokaMultiplier : Float;
+    rewardXpMultiplier : Float
+  };
+type BossPhaseConfig__423122238 =
+  {
+    hpThreshold : Float;
+    phaseNumber : Nat;
+    specialAbilities : [Text];
+    spellPoolIds : [Text];
+    statMultiplier : Float;
+    summonCount : Nat
+  };
+type BossPhaseConfig__698600719 =
+  {
+    hpThreshold : Float;
+    phaseNumber : Nat;
+    specialAbilities : [Text];
+    spellPoolIds : [Text];
+    statMultiplier : Float;
+    summonCount : Nat
+  };
+type BossRushState__234571706 =
+  {currentRoom : Nat; highestRoomCompleted : Nat; totalBossRushRuns : Nat};
+type BossRushState__268176068 =
+  {currentRoom : Nat; highestRoomCompleted : Nat; totalBossRushRuns : Nat};
+type BossStats__498679054 =
+  {ap : Nat; atk : Nat; hp : Nat; init : Nat; mp : Nat; res : Nat; sp : Nat};
+type BossStats__777147753 =
+  {ap : Nat; atk : Nat; hp : Nat; init : Nat; mp : Nat; res : Nat; sp : Nat};
+type BuffInventoryItem__557326757 = {itemId : Text; quantity : Nat};
+type BuffInventoryItem__846164522 = {itemId : Text; quantity : Nat};
+type BuffInventory__125372464 = [BuffInventoryItem__846164522];
+type BuffInventory__20865319 = [BuffInventoryItem__557326757];
+type CharacterSlot__334594731 = ?Character__117766171;
+type CharacterSlot__393264275 = ?Character__519318640;
+type CharacterSlots__819220177 =
+  {
+    slot1 : CharacterSlot__393264275;
+    slot2 : CharacterSlot__393264275;
+    slot3 : CharacterSlot__393264275
+  };
+type CharacterSlots__903415528 =
+  {
+    slot1 : CharacterSlot__334594731;
+    slot2 : CharacterSlot__334594731;
+    slot3 : CharacterSlot__334594731
+  };
+type CharacterStats__1012153666 =
+  {
+    ap : Nat;
+    atk : Nat;
+    chc : Nat;
+    evasion : Nat;
+    hp : Nat;
+    init : Nat;
+    killCount : Nat;
+    mp : Nat;
+    res : Nat;
+    resilience : Nat;
+    sp : Nat;
+    sr : Nat
+  };
+type CharacterStats__860559781 =
+  {
+    ap : Nat;
+    atk : Nat;
+    chc : Nat;
+    evasion : Nat;
+    hp : Nat;
+    init : Nat;
+    killCount : Nat;
+    mp : Nat;
+    res : Nat;
+    resilience : Nat;
+    sp : Nat;
+    sr : Nat
+  };
+type Character__117766171 =
+  {
+    activeSpells : ?[Nat];
+    bloodBalance : ?Nat;
+    bossRushMasterComplete : ?Bool;
+    colors : [Text];
+    covenantBuff : ?Text;
+    experience : Nat;
+    level : Nat;
+    name : Text;
+    pieceType : Text;
+    pixelPattern : Text;
+    rotation : Nat;
+    shrineCount : ?Nat;
+    spellBarOrder : ?[Text];
+    spellLevelKeys : [Text];
+    spellLevelValues : [Nat];
+    stats : CharacterStats__1012153666
+  };
+type Character__519318640 =
+  {
+    activeSpells : ?[Nat];
+    bloodBalance : ?Nat;
+    bossRushMasterComplete : ?Bool;
+    colors : [Text];
+    covenantBuff : ?Text;
+    experience : Nat;
+    level : Nat;
+    name : Text;
+    pieceType : Text;
+    pixelPattern : Text;
+    rotation : Nat;
+    shrineCount : ?Nat;
+    spellBarOrder : ?[Text];
+    spellLevelKeys : [Text];
+    spellLevelValues : [Nat];
+    stats : CharacterStats__860559781
+  };
+type ChatMessage__1037536196 =
+  {
+    colorHex : Text;
+    id : Nat;
+    playerName : Text;
+    text : Text;
+    timestampMs : Int
+  };
+type ChatMessage__659813887 =
+  {
+    colorHex : Text;
+    id : Nat;
+    playerName : Text;
+    text : Text;
+    timestampMs : Int
+  };
+type Data__552063367<K, V> = {var count : Nat__93962160; kvs : [var ?(K, V)]};
+type DungeonRecord__353204602 =
+  {bestRewardMultiplier : Float; chainDepth : Nat; totalMapsCompleted : Nat};
+type DungeonRecord__678903002 =
+  {bestRewardMultiplier : Float; chainDepth : Nat; totalMapsCompleted : Nat};
+type EnemyConfig__302142410 =
+  {
+    ap : Nat;
+    hp : Nat;
+    id : Text;
+    initStat : Nat;
+    levelMax : Nat;
+    levelMin : Nat;
+    mp : Nat;
+    name : Text;
+    regions : [Text];
+    spriteUrl : ?Text
+  };
+type EnemyConfig__527275230 =
+  {
+    ap : Nat;
+    hp : Nat;
+    id : Text;
+    initStat : Nat;
+    levelMax : Nat;
+    levelMin : Nat;
+    mp : Nat;
+    name : Text;
+    regions : [Text];
+    spriteUrl : ?Text
+  };
+type GameConfig__442982512 =
+  {dokaSpawnBaseValue : Nat; dokaSpawnChance : Nat; leaderBoostPercent : Nat};
+type Internal__455405067<K, V> =
+  {children : [var ?Node__279997185<K, V>]; data : Data__552063367<K, V>};
+type Leaf__114713147<K, V> = {data : Data__552063367<K, V>};
+type LevelUpConfig__359142007 =
+  {
+    apMpLevelThreshold : Nat;
+    maxSpellRange : Nat;
+    spellDmgGrowthPercent : Nat;
+    spellFailBaseChance : Float;
+    spellFailReductionPerLevel : Float;
+    spellLevelingBaseCost : Nat;
+    spellLevelingCostMultiplier : Float;
+    spellRangeGrowthLevels : Nat;
+    statGrowthPercent : Nat
+  };
+type List__716101829<T> =
+  {
+    var blockIndex : Nat__93962160;
+    var blocks : [var [var ?T]];
+    var elementIndex : Nat__93962160
+  };
+type List__852723865<T> = List__716101829<T>;
+type MapModifierConfig__684675300 =
+  {
+    active : Bool;
+    description : Text;
+    id : Text;
+    modifierType : Text;
+    name : Text;
+    triggerChance : Nat
+  };
+type MapModifierConfig__998818509 =
+  {
+    active : Bool;
+    description : Text;
+    id : Text;
+    modifierType : Text;
+    name : Text;
+    triggerChance : Nat
+  };
+type Map__190625089<K, V> = Map__719753394<K, V>;
+type Map__246123559<K, V> = Map__190625089<K, V>;
+type Map__719753394<K, V> =
+  {var root : Node__279997185<K, V>; var size : Nat__93962160};
+type Nat__920180692 = Nat;
+type Nat__93962160 = Nat__920180692;
+type NewActor__494720447 = OldActor__438399882;
+type Node__279997185<K, V> =
+  {#internal : Internal__455405067<K, V>; #leaf : Leaf__114713147<K, V>};
+type OldActor__438399882 =
+  {
+    BUFF_CATALOG : [(Text, Text, Nat)];
+    DEFAULT_ENEMY_NAMES : [Text];
+    ROLE_CHANGE_MIN_NS : Int;
+    accessControlState : AccessControlState__45017055;
+    achievementConfigs : Map__246123559<Text, AchievementConfig__371522003>;
+    achievementProgress :
+      Map__246123559<Text, AchievementProgress__592946033>;
+    var adBoxes : [(Text, Text, Bool)];
+    var appVersion : Text;
+    bannedPrincipals : Map__246123559<Text, Bool>;
+    bossConfigs : Map__246123559<Text, BossConfig__946198359>;
+    bossPortalAssignments : Map__246123559<Text, Text>;
+    var bossRushConfigStore : Text;
+    bossRushStates : Map__246123559<Text, BossRushState__268176068>;
+    buffInventories : Map__246123559<Text, BuffInventory__125372464>;
+    changelogShownVersions : Map__246123559<Principal, Text>;
+    changelogs : Map__246123559<Text, Text>;
+    characterSlots : Map__246123559<Principal, CharacterSlots__819220177>;
+    var chatMessages : List__852723865<ChatMessage__659813887>;
+    var colorPaletteStore : Text;
+    dokaBalances : Map__246123559<Principal, Nat>;
+    dungeonRecords : Map__246123559<Principal, DungeonRecord__353204602>;
+    enemyConfigs : Map__246123559<Text, EnemyConfig__302142410>;
+    var enemyNames : List__852723865<Text>;
+    var enemyNamesInitialised : Bool;
+    var gameConfig : GameConfig__442982512;
+    var levelUpConfig : LevelUpConfig__359142007;
+    mapModifierConfigs : Map__246123559<Text, MapModifierConfig__684675300>;
+    var nextChatId : Nat;
+    var nextPurchaseId : Nat;
+    playerSpriteConfigs : Map__246123559<Text, PlayerSpriteConfig__674386463>;
+    purchaseRecords : Map__246123559<Text, PurchaseRecord__739711643>;
+    regionConfigs : Map__246123559<Text, RegionConfig__912494202>;
+    roleChangeTimestamps : Map__246123559<Text, Int>;
+    shopPackages : Map__246123559<Text, ShopPackage__963084404>;
+    spellConfigs : Map__246123559<Text, SpellConfig__671188302>;
+    var tierSpawnConfig : TierSpawnConfig__885983572;
+    userProfiles : Map__246123559<Principal, UserProfile__304445562>
+  };
+type PlayerSpriteConfig__297021837 =
+  {
+    backUrl : ?Text;
+    backWalkFrames : [Text];
+    characterPieceType : Text;
+    frontUrl : ?Text;
+    frontWalkFrames : [Text];
+    id : Text;
+    leftUrl : ?Text;
+    leftWalkFrames : [Text];
+    name : Text;
+    rightUrl : ?Text;
+    rightWalkFrames : [Text]
+  };
+type PlayerSpriteConfig__674386463 =
+  {
+    backUrl : ?Text;
+    backWalkFrames : [Text];
+    characterPieceType : Text;
+    frontUrl : ?Text;
+    frontWalkFrames : [Text];
+    id : Text;
+    leftUrl : ?Text;
+    leftWalkFrames : [Text];
+    name : Text;
+    rightUrl : ?Text;
+    rightWalkFrames : [Text]
+  };
+type PurchaseRecord__154387943 =
+  {
+    customerAddress : Text;
+    customerCity : Text;
+    customerCountry : Text;
+    customerEmail : Text;
+    customerName : Text;
+    customerPostal : Text;
+    customerSurname : Text;
+    dokaAmount : Nat;
+    id : Text;
+    packageId : Text;
+    proofFileUrl : Text;
+    status : Text;
+    timestamp : Int;
+    userPrincipal : Principal
+  };
+type PurchaseRecord__739711643 =
+  {
+    customerAddress : Text;
+    customerCity : Text;
+    customerCountry : Text;
+    customerEmail : Text;
+    customerName : Text;
+    customerPostal : Text;
+    customerSurname : Text;
+    dokaAmount : Nat;
+    id : Text;
+    packageId : Text;
+    proofFileUrl : Text;
+    status : Text;
+    timestamp : Int;
+    userPrincipal : Principal
+  };
+type RegionConfig__839504699 =
+  {
+    backgroundColor : Text;
+    battleEffects : [BattleEffect__485425701];
+    id : Text;
+    levelMax : Nat;
+    levelMin : Nat;
+    name : Text
+  };
+type RegionConfig__912494202 =
+  {
+    backgroundColor : Text;
+    battleEffects : [BattleEffect__669342150];
+    id : Text;
+    levelMax : Nat;
+    levelMin : Nat;
+    name : Text
+  };
+type ShopPackage__522983212 =
+  {
+    displayOrder : Nat;
+    dokaAmount : Nat;
+    id : Text;
+    paymentLink : Text;
+    priceEuroCents : Nat
+  };
+type ShopPackage__963084404 =
+  {
+    displayOrder : Nat;
+    dokaAmount : Nat;
+    id : Text;
+    paymentLink : Text;
+    priceEuroCents : Nat
+  };
+type SpellConfig__671188302 =
+  {
+    aoe : Bool;
+    apCost : Nat;
+    cooldown : Nat;
+    damage : Nat;
+    description : Text;
+    diagonal : Bool;
+    effectCategory : Text;
+    effectParams : ?Text;
+    effectType : Text;
+    freeCells : Bool;
+    healAmount : Nat;
+    hitTiles : [(Int, Int)];
+    hitsAllies : Bool;
+    iconEmoji : Text;
+    id : Text;
+    isPhysical : Bool;
+    lineOfSight : Bool;
+    linear : Bool;
+    maxRange : Nat;
+    minLevel : Nat;
+    minRange : Nat;
+    modifiableRange : Bool;
+    mpCost : Nat;
+    multiTarget : Bool;
+    name : Text;
+    range : Nat;
+    spellType : Text;
+    usableByEnemy : Bool;
+    usableByPlayer : Bool
+  };
+type SpellConfig__773412400 =
+  {
+    aoe : Bool;
+    apCost : Nat;
+    cooldown : Nat;
+    damage : Nat;
+    description : Text;
+    diagonal : Bool;
+    effectCategory : Text;
+    effectParams : ?Text;
+    effectType : Text;
+    freeCells : Bool;
+    healAmount : Nat;
+    hitTiles : [(Int, Int)];
+    hitsAllies : Bool;
+    iconEmoji : Text;
+    id : Text;
+    isPhysical : Bool;
+    lineOfSight : Bool;
+    linear : Bool;
+    maxRange : Nat;
+    minLevel : Nat;
+    minRange : Nat;
+    modifiableRange : Bool;
+    mpCost : Nat;
+    multiTarget : Bool;
+    name : Text;
+    range : Nat;
+    spellType : Text;
+    usableByEnemy : Bool;
+    usableByPlayer : Bool
+  };
+type TierSpawnConfig__885983572 =
+  {
+    adjacentTierPercent : Float;
+    sameTierPercent : Float;
+    threeOrMorePercent : Float;
+    tierSize : Nat;
+    twoAwayPercent : Float
+  };
+type UserProfile__304445562 = {name : Text; uiLayout : Text};
+type UserProfile__491224006 = {name : Text; uiLayout : Text};
+type UserRole__1073662873 = {#admin; #guest; #user};
+{
+  "20260803_185500" : (old : OldActor__438399882) -> NewActor__494720447
+}
+actor  {
+  stable BUFF_CATALOG : [(Text, Text, Nat)];
+  stable DEFAULT_ENEMY_NAMES : [Text];
+  stable ROLE_CHANGE_MIN_NS : Int;
+  stable accessControlState :
+    {
+      var adminAssigned : Bool;
+      userRoles : Map__246123559<Principal, UserRole__1073662873>
+    };
+  stable achievementConfigs :
+    {
+      var root : Node__279997185<Text, AchievementConfig__943077584>;
+      var size : Nat__93962160
+    };
+  stable achievementProgress :
+    {
+      var root : Node__279997185<Text, AchievementProgress__1034666012>;
+      var size : Nat__93962160
+    };
+  stable var adBoxes : [(Text, Text, Bool)];
+  stable var appVersion : Text;
+  stable bannedPrincipals :
+    {var root : Node__279997185<Text, Bool>; var size : Nat__93962160};
+  stable bossConfigs :
+    {
+      var root : Node__279997185<Text, BossConfig__765161734>;
+      var size : Nat__93962160
+    };
+  stable bossPortalAssignments :
+    {var root : Node__279997185<Text, Text>; var size : Nat__93962160};
+  stable var bossRushConfigStore : Text;
+  stable bossRushStates :
+    {
+      var root : Node__279997185<Text, BossRushState__234571706>;
+      var size : Nat__93962160
+    };
+  stable buffInventories :
+    {
+      var root : Node__279997185<Text, BuffInventory__20865319>;
+      var size : Nat__93962160
+    };
+  stable changelogShownVersions :
+    {var root : Node__279997185<Principal, Text>; var size : Nat__93962160};
+  stable changelogs :
+    {var root : Node__279997185<Text, Text>; var size : Nat__93962160};
+  stable characterSlots :
+    {
+      var root : Node__279997185<Principal, CharacterSlots__903415528>;
+      var size : Nat__93962160
+    };
+  stable var chatMessages :
+    {
+      var blockIndex : Nat__93962160;
+      var blocks : [var [var ?ChatMessage__1037536196]];
+      var elementIndex : Nat__93962160
+    };
+  stable var colorPaletteStore : Text;
+  stable dokaBalances :
+    {var root : Node__279997185<Principal, Nat>; var size : Nat__93962160};
+  stable dungeonRecords :
+    {
+      var root : Node__279997185<Principal, DungeonRecord__678903002>;
+      var size : Nat__93962160
+    };
+  stable enemyConfigs :
+    {
+      var root : Node__279997185<Text, EnemyConfig__527275230>;
+      var size : Nat__93962160
+    };
+  stable var enemyNames :
+    {
+      var blockIndex : Nat__93962160;
+      var blocks : [var [var ?Text]];
+      var elementIndex : Nat__93962160
+    };
+  stable var enemyNamesInitialised : Bool;
+  stable var gameConfig :
+    {
+      dokaSpawnBaseValue : Nat;
+      dokaSpawnChance : Nat;
+      leaderBoostPercent : Nat
+    };
+  stable var levelUpConfig :
+    {
+      apMpLevelThreshold : Nat;
+      maxSpellRange : Nat;
+      spellDmgGrowthPercent : Nat;
+      spellFailBaseChance : Float;
+      spellFailReductionPerLevel : Float;
+      spellLevelingBaseCost : Nat;
+      spellLevelingCostMultiplier : Float;
+      spellRangeGrowthLevels : Nat;
+      statGrowthPercent : Nat
+    };
+  stable mapModifierConfigs :
+    {
+      var root : Node__279997185<Text, MapModifierConfig__998818509>;
+      var size : Nat__93962160
+    };
+  stable var nextChatId : Nat;
+  stable var nextPurchaseId : Nat;
+  stable playerSpriteConfigs :
+    {
+      var root : Node__279997185<Text, PlayerSpriteConfig__297021837>;
+      var size : Nat__93962160
+    };
+  stable purchaseRecords :
+    {
+      var root : Node__279997185<Text, PurchaseRecord__154387943>;
+      var size : Nat__93962160
+    };
+  stable regionConfigs :
+    {
+      var root : Node__279997185<Text, RegionConfig__839504699>;
+      var size : Nat__93962160
+    };
+  stable roleChangeTimestamps :
+    {var root : Node__279997185<Text, Int>; var size : Nat__93962160};
+  stable shopPackages :
+    {
+      var root : Node__279997185<Text, ShopPackage__522983212>;
+      var size : Nat__93962160
+    };
+  stable spellConfigs :
+    {
+      var root : Node__279997185<Text, SpellConfig__773412400>;
+      var size : Nat__93962160
+    };
+  stable var tierSpawnConfig :
+    {
+      adjacentTierPercent : Float;
+      sameTierPercent : Float;
+      threeOrMorePercent : Float;
+      tierSize : Nat;
+      twoAwayPercent : Float
+    };
+  stable userProfiles :
+    {
+      var root : Node__279997185<Principal, UserProfile__491224006>;
+      var size : Nat__93962160
+    }
+};

@@ -161,4 +161,48 @@ assert.equal(spellUpgradeUiSpend(100, 0, 190), 10);
   assert.equal(lock.snapshot().doka, 190);
 }
 
+{
+  // Chronology: upgradeSpell #ok(2) deducts 20. getCallerDokaBalance throws.
+  // The persist job used to reject, so spellLevelsRef / the lock never
+  // updated and inFlight cleared. Retry called upgradeSpell again (level 3,
+  // another 20). Recap heal saveBattleStats then wrote the pre-upgrade
+  // wallet and wiped the first spend (saveBattleStats never mints).
+  let upgrades = 0;
+  const throwingActor = {
+    upgradeSpell: async () => {
+      upgrades += 1;
+      return { ok: BigInt(1 + upgrades) };
+    },
+    getCallerDokaBalance: async () => {
+      throw new Error("query replica unavailable");
+    },
+  };
+  const lock = createProgressPersist({ doka: 200, xp: 0, level: 1 });
+  const first = await lock.enqueue(async () => {
+    const committedBefore = lock.snapshot().doka;
+    const result = await persistSpellUpgrade(throwingActor, 1, "fireball");
+    const nextDoka = committedDokaAfterSpellUpgrade(
+      committedBefore,
+      result.newDoka,
+      20,
+    );
+    lock.commit({ doka: nextDoka });
+    return result;
+  });
+  assert.equal(first.newLevel, 2);
+  assert.equal(first.newDoka, undefined);
+  assert.equal(lock.snapshot().doka, 180);
+  assert.equal(upgrades, 1);
+
+  const spend = 30;
+  const wroteDoka = lock.snapshot().doka - spend;
+  lock.commit({ doka: wroteDoka });
+  assert.equal(lock.snapshot().doka, 150);
+  assert.equal(
+    upgrades,
+    1,
+    "a throwing wallet query after #ok must not look like a failed upgrade",
+  );
+}
+
 console.log("spellUpgrade.test: ok");

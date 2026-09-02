@@ -1,6 +1,7 @@
 /**
  * Summon integration helpers — minimal bridge between WorldExploration.tsx
- * and the pure summon engine modules (summonAI.ts, summonSpawn.ts, spellEngine.ts).
+ * and the pure summon engine modules (summonSpawn.ts, summonExecutor.ts,
+ * spellEngine.ts). `summonAI.ts` is unused; live turns go through enemyAI.
  *
  * All functions are side-effect-free except where explicitly noted.
  */

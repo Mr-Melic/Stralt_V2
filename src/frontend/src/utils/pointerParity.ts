@@ -2,9 +2,13 @@
  * Shared pointer / keyboard helpers so mouse and touch enforce the same
  * combat and world-move legality. WorldExploration wires these at the
  * click/touch call sites; do not fork the rules per input device.
+ *
+ * Ghost-click window is the same 400ms as pointerGesture (AGENTS.md canvas
+ * onTouchEnd + onClick). Do not widen one helper without the other.
  */
+import { SYNTHETIC_CLICK_SUPPRESS_MS } from "./pointerGesture.ts";
 
-export const SYNTHETIC_CLICK_GUARD_MS = 500;
+export const SYNTHETIC_CLICK_GUARD_MS = SYNTHETIC_CLICK_SUPPRESS_MS;
 
 export function shouldIgnoreSyntheticClickAfterTouch(
   lastTouchEndAt: number,

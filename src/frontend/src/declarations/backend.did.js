@@ -24,6 +24,20 @@ export const PurchaseRecord = IDL.Record({
   'packageId' : IDL.Text,
   'customerCity' : IDL.Text,
 });
+export const GameKeyRequest = IDL.Record({
+  'id' : IDL.Text,
+  'redeemedAt' : IDL.Int,
+  'redeemedBy' : IDL.Text,
+  'status' : IDL.Text,
+  'emailed' : IDL.Bool,
+  'emailConsent' : IDL.Bool,
+  'approvedAt' : IDL.Int,
+  'dokaAmount' : IDL.Nat,
+  'email' : IDL.Text,
+  'userPrincipal' : IDL.Principal,
+  'timestamp' : IDL.Int,
+  'hintedEuroCents' : IDL.Nat,
+});
 export const AchievementConfig = IDL.Record({
   'id' : IDL.Text,
   'active' : IDL.Bool,
@@ -292,6 +306,11 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
       [],
     ),
+  'adminApproveGameKeyPurchase' : IDL.Func(
+      [IDL.Text, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
+      [],
+    ),
   'adminBanAccount' : IDL.Func(
       [IDL.Principal],
       [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
@@ -342,6 +361,11 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
       ['query'],
     ),
+  'adminGetGameKeyReveal' : IDL.Func(
+      [IDL.Text],
+      [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
+      ['query'],
+    ),
   'adminGetPurchaseRecords' : IDL.Func(
       [IDL.Opt(IDL.Text)],
       [IDL.Variant({ 'ok' : IDL.Vec(PurchaseRecord), 'err' : IDL.Text })],
@@ -349,6 +373,21 @@ export const idlService = IDL.Service({
     ),
   'adminGrantDoka' : IDL.Func(
       [IDL.Principal, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'adminListGameKeyRequests' : IDL.Func(
+      [],
+      [IDL.Variant({ 'ok' : IDL.Vec(GameKeyRequest), 'err' : IDL.Text })],
+      ['query'],
+    ),
+  'adminMarkGameKeyEmailed' : IDL.Func(
+      [IDL.Text],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'adminRejectGameKeyPurchase' : IDL.Func(
+      [IDL.Text],
       [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
       [],
     ),
@@ -620,6 +659,11 @@ export const idlService = IDL.Service({
   'getLevelUpConfig' : IDL.Func([], [LevelUpConfig], ['query']),
   'getMapModifiers' : IDL.Func([], [IDL.Vec(MapModifierConfig)], ['query']),
   'getMessages' : IDL.Func([], [IDL.Vec(ChatMessage)], ['query']),
+  'getMyGameKeyPurchaseStatus' : IDL.Func(
+      [],
+      [IDL.Opt(GameKeyRequest)],
+      ['query'],
+    ),
   'getMyPurchaseHistory' : IDL.Func([], [IDL.Vec(PurchaseRecord)], ['query']),
   'getPlayerAchievements' : IDL.Func(
       [IDL.Principal],
@@ -697,9 +741,19 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : BuffInventory, 'err' : IDL.Text })],
       [],
     ),
+  'redeemGameKey' : IDL.Func(
+      [IDL.Text],
+      [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
+      [],
+    ),
   'renameCharacter' : IDL.Func(
       [IDL.Nat, IDL.Text],
       [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'requestGameKeyPurchase' : IDL.Func(
+      [IDL.Text, IDL.Bool, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
       [],
     ),
   'resetBossRush' : IDL.Func([IDL.Nat], [], []),
@@ -825,6 +879,20 @@ export const idlFactory = ({ IDL }) => {
     'customerEmail' : IDL.Text,
     'packageId' : IDL.Text,
     'customerCity' : IDL.Text,
+  });
+  const GameKeyRequest = IDL.Record({
+    'id' : IDL.Text,
+    'redeemedAt' : IDL.Int,
+    'redeemedBy' : IDL.Text,
+    'status' : IDL.Text,
+    'emailed' : IDL.Bool,
+    'emailConsent' : IDL.Bool,
+    'approvedAt' : IDL.Int,
+    'dokaAmount' : IDL.Nat,
+    'email' : IDL.Text,
+    'userPrincipal' : IDL.Principal,
+    'timestamp' : IDL.Int,
+    'hintedEuroCents' : IDL.Nat,
   });
   const AchievementConfig = IDL.Record({
     'id' : IDL.Text,
@@ -1091,6 +1159,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
         [],
       ),
+    'adminApproveGameKeyPurchase' : IDL.Func(
+        [IDL.Text, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
+        [],
+      ),
     'adminBanAccount' : IDL.Func(
         [IDL.Principal],
         [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
@@ -1141,6 +1214,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
         ['query'],
       ),
+    'adminGetGameKeyReveal' : IDL.Func(
+        [IDL.Text],
+        [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
+        ['query'],
+      ),
     'adminGetPurchaseRecords' : IDL.Func(
         [IDL.Opt(IDL.Text)],
         [IDL.Variant({ 'ok' : IDL.Vec(PurchaseRecord), 'err' : IDL.Text })],
@@ -1148,6 +1226,21 @@ export const idlFactory = ({ IDL }) => {
       ),
     'adminGrantDoka' : IDL.Func(
         [IDL.Principal, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'adminListGameKeyRequests' : IDL.Func(
+        [],
+        [IDL.Variant({ 'ok' : IDL.Vec(GameKeyRequest), 'err' : IDL.Text })],
+        ['query'],
+      ),
+    'adminMarkGameKeyEmailed' : IDL.Func(
+        [IDL.Text],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'adminRejectGameKeyPurchase' : IDL.Func(
+        [IDL.Text],
         [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
         [],
       ),
@@ -1423,6 +1516,11 @@ export const idlFactory = ({ IDL }) => {
     'getLevelUpConfig' : IDL.Func([], [LevelUpConfig], ['query']),
     'getMapModifiers' : IDL.Func([], [IDL.Vec(MapModifierConfig)], ['query']),
     'getMessages' : IDL.Func([], [IDL.Vec(ChatMessage)], ['query']),
+    'getMyGameKeyPurchaseStatus' : IDL.Func(
+        [],
+        [IDL.Opt(GameKeyRequest)],
+        ['query'],
+      ),
     'getMyPurchaseHistory' : IDL.Func([], [IDL.Vec(PurchaseRecord)], ['query']),
     'getPlayerAchievements' : IDL.Func(
         [IDL.Principal],
@@ -1500,9 +1598,19 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : BuffInventory, 'err' : IDL.Text })],
         [],
       ),
+    'redeemGameKey' : IDL.Func(
+        [IDL.Text],
+        [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
+        [],
+      ),
     'renameCharacter' : IDL.Func(
         [IDL.Nat, IDL.Text],
         [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'requestGameKeyPurchase' : IDL.Func(
+        [IDL.Text, IDL.Bool, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
         [],
       ),
     'resetBossRush' : IDL.Func([IDL.Nat], [], []),

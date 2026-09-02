@@ -3,7 +3,7 @@
 // Uses the shared DraggablePanel so it docks with the other floating panels.
 
 import type React from "react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { soundEngine } from "../engine/soundEngine";
 import DraggablePanel from "./DraggablePanel";
 
@@ -165,4 +165,4 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ userId }) => {
   );
 };
 
-export default SettingsPanel;
+export default memo(SettingsPanel);

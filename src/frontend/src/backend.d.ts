@@ -7,9 +7,12 @@ export interface None {
     __kind__: "None";
 }
 export type Option<T> = Some<T> | None;
-export interface UserProfile {
-    name: string;
-    uiLayout: string;
+export interface AchievementProgress {
+    achievementId: string;
+    unlockedAt: bigint;
+    unlocked: boolean;
+    claimed: boolean;
+    principalId: string;
 }
 export interface MapModifierConfig {
     id: string;
@@ -78,10 +81,12 @@ export interface SpellConfig {
     isPhysical: boolean;
     name: string;
     hitTiles: Array<[bigint, bigint]>;
+    summonAI: string;
     description: string;
     minLevel: bigint;
     apCost: bigint;
     multiTarget: boolean;
+    summonLifespan: bigint;
     modifiableRange: boolean;
     usableByEnemy: boolean;
     maxRange: bigint;
@@ -89,6 +94,7 @@ export interface SpellConfig {
     iconEmoji: string;
     hitsAllies: boolean;
     effectType: string;
+    summonUnitDef: SummonUnitDef;
     usableByPlayer: boolean;
     spellType: string;
     diagonal: boolean;
@@ -96,18 +102,7 @@ export interface SpellConfig {
     range: bigint;
     linear: boolean;
     cooldown: bigint;
-}
-export interface AdminGameConfig {
-    leaderBoostPercent: bigint;
-    dokaSpawnBaseValue: bigint;
-    dokaSpawnChance: bigint;
-}
-export interface ShopPackage {
-    id: string;
-    displayOrder: bigint;
-    dokaAmount: bigint;
-    priceEuroCents: bigint;
-    paymentLink: string;
+    isSummon: boolean;
 }
 export interface PlayerSpriteConfig {
     id: string;
@@ -122,6 +117,13 @@ export interface PlayerSpriteConfig {
     leftUrl?: string;
     backUrl?: string;
 }
+export interface ShopPackage {
+    id: string;
+    displayOrder: bigint;
+    dokaAmount: bigint;
+    priceEuroCents: bigint;
+    paymentLink: string;
+}
 export interface LevelUpConfig {
     spellLevelingCostMultiplier: number;
     spellLevelingBaseCost: bigint;
@@ -133,9 +135,28 @@ export interface LevelUpConfig {
     spellDmgGrowthPercent: bigint;
     apMpLevelThreshold: bigint;
 }
+export interface GameKeyRequest {
+    id: string;
+    redeemedAt: bigint;
+    redeemedBy: string;
+    status: string;
+    emailed: boolean;
+    emailConsent: boolean;
+    approvedAt: bigint;
+    dokaAmount: bigint;
+    email: string;
+    userPrincipal: Principal;
+    timestamp: bigint;
+    hintedEuroCents: bigint;
+}
 export interface Cell {
     value: Value;
     name: string;
+}
+export interface AdminGameConfig {
+    leaderBoostPercent: bigint;
+    dokaSpawnBaseValue: bigint;
+    dokaSpawnChance: bigint;
 }
 export interface ChatMessage {
     id: bigint;
@@ -169,6 +190,14 @@ export interface CharacterSlots {
     slot2: CharacterSlot;
     slot3: CharacterSlot;
 }
+export interface AdminAuditEntry {
+    action: string;
+    adminPrincipal: string;
+    previousSummary: string;
+    objectId: string;
+    newSummary: string;
+    timestampNs: bigint;
+}
 export interface CharacterStats {
     ap: bigint;
     hp: bigint;
@@ -195,13 +224,6 @@ export interface EnemyConfig {
     spriteUrl?: string;
     regions: Array<string>;
 }
-export interface BattleEffect {
-    id: string;
-    value: bigint;
-    name: string;
-    description: string;
-    effectType: Variant_damage_buff_debuff;
-}
 export interface BossConfig {
     id: string;
     pieceType: string;
@@ -216,6 +238,27 @@ export interface BossConfig {
     phase2: BossPhaseConfig;
     defeated: boolean;
 }
+export interface BossPhaseConfig {
+    hpThreshold: number;
+    statMultiplier: number;
+    phaseNumber: bigint;
+    spellPoolIds: Array<string>;
+    specialAbilities: Array<string>;
+    summonCount: bigint;
+}
+export interface BattleEffect {
+    id: string;
+    value: bigint;
+    name: string;
+    description: string;
+    effectType: Variant_damage_buff_debuff;
+}
+export interface SummonUnitDef {
+    pieceType: string;
+    level: bigint;
+    hpScale: number;
+    damageScale: number;
+}
 export interface Result {
     hasMore: boolean;
     rows: Array<Array<Cell>>;
@@ -227,14 +270,6 @@ export interface RegionConfig {
     levelMin: bigint;
     name: string;
     battleEffects: Array<BattleEffect>;
-}
-export interface BossPhaseConfig {
-    hpThreshold: number;
-    statMultiplier: number;
-    phaseNumber: bigint;
-    spellPoolIds: Array<string>;
-    specialAbilities: Array<string>;
-    summonCount: bigint;
 }
 export interface PurchaseRecord {
     id: string;
@@ -252,12 +287,9 @@ export interface PurchaseRecord {
     packageId: string;
     customerCity: string;
 }
-export interface AchievementProgress {
-    achievementId: string;
-    unlockedAt: bigint;
-    unlocked: boolean;
-    claimed: boolean;
-    principalId: string;
+export interface UserProfile {
+    name: string;
+    uiLayout: string;
 }
 export interface DungeonRecord {
     chainDepth: bigint;
@@ -295,6 +327,17 @@ export interface backendInterface {
     adminAddDokaToUser(userPrincipal: Principal, dokaAmount: bigint, purchaseId: string | null): Promise<{
         __kind__: "ok";
         ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
+     * / Admin: after Mollie payment, set Doka worth and mint a 120-char GameKey
+     * / from IC `raw_rand`. Returns the code once; store it only in the reveal map.
+     */
+    adminApproveGameKeyPurchase(requestId: string, dokaAmount: bigint): Promise<{
+        __kind__: "ok";
+        ok: string;
     } | {
         __kind__: "err";
         err: string;
@@ -387,6 +430,16 @@ export interface backendInterface {
         err: string;
     }>;
     /**
+     * / Admin: one-time reveal until marked emailed. Empty #err if already wiped.
+     */
+    adminGetGameKeyReveal(requestId: string): Promise<{
+        __kind__: "ok";
+        ok: string;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
      * / Admin: get all purchase records, optionally filtered by principal text.
      */
     adminGetPurchaseRecords(filterPrincipal: string | null): Promise<{
@@ -401,6 +454,72 @@ export interface backendInterface {
      * / Alias for adminAddDoka; named adminGrantDoka to match the frontend's expected method name.
      */
     adminGrantDoka(targetPrincipal: Principal, amount: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
+     * / Admin: incoming GameKey purchase requests. No plaintext codes.
+     */
+    adminListGameKeyRequests(): Promise<{
+        __kind__: "ok";
+        ok: Array<GameKeyRequest>;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
+     * / Admin: confirm the code was copied/mailed. Wipes the plaintext reveal.
+     * / The canister cannot send email; this is the honest hand-off.
+     */
+    adminMarkGameKeyEmailed(requestId: string): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
+     * / Admin: payment never arrived.
+     */
+    adminRejectGameKeyPurchase(requestId: string): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    adminRollbackBossRushConfig(): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    adminRollbackColorPalette(): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    adminRollbackGameConfig(): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    adminRollbackLevelUpConfig(): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    adminRollbackTierSpawnConfig(): Promise<{
         __kind__: "ok";
         ok: null;
     } | {
@@ -554,7 +673,7 @@ export interface backendInterface {
     }>;
     /**
      * / Admin: ban a player with a reason (convenience alias for adminBanAccount with reason).
-     * / M2: also clears achievement progress so banned players cannot double-claim on unban.
+     * / Achievement progress is preserved; claimed flags block a second payout.
      */
     banPlayer(userPrincipal: Principal, reason: string): Promise<{
         __kind__: "ok";
@@ -574,19 +693,9 @@ export interface backendInterface {
         err: string;
     }>;
     /**
-     * / For each enemy in the list, computes a Doka drop using true IC randomness,
-     * / sums the drops, adds to the caller's balance, and returns the total earned.
-     * /
-     * / Tier probabilities (out of 10_000 units):
-     * /   9000 / 10000 = 90%   → 1–3
-     * /    500 / 10000 =  5%   → 1–10
-     * /    300 / 10000 =  3%   → 1–50
-     * /    100 / 10000 =  1%   → 55–100
-     * /     50 / 10000 = 0.5%  → 1–1000
-     * /     40 / 10000 = 0.4%  → 1–5000
-     * /      5 / 10000 = 0.05% → 1–1_000_000
-     * /      1 / 10000 = 0.01% (≈ 0.0001%) → 1–1_000_000_000
-     * /      4 remaining → 1–50  (lumped with 3% tier)
+     * / Unused public mint. Official Doka credits go through applyRewards.
+     * / Candid signature kept; the body does not award. A raw client previously
+     * / could request 8×200×1e9 Doka per call via the jackpot tier.
      */
     calculateAndAwardDoka(enemies: Array<{
         level: bigint;
@@ -613,13 +722,22 @@ export interface backendInterface {
      * / Called when a boss rush room is cleared. Awards Doka and XP to the character.
      * / Room 10 (roomIndex = 9 completed → highestRoomCompleted reaches 10) sets bossRushMasterComplete.
      */
-    completeBossRushRoom(slot: bigint, roomIndex: bigint, dokaReward: bigint, xpReward: bigint): Promise<{
+    completeBossRushRoom(slot: bigint, roomIndex: bigint, _dokaReward: bigint, _xpReward: bigint): Promise<{
         __kind__: "ok";
         ok: null;
     } | {
         __kind__: "err";
         err: string;
     }>;
+    /**
+     * / Appearance edits used to union incoming spell arrays and take
+     * / max(existing, incoming) per id. A custom client could then:
+     * /   1. inject a retired catalog id the player never owned, after which
+     * /      upgradeSpell treats `found=true` and skips the retirement check;
+     * /   2. raise paid levels without going through upgradeSpell.
+     * / Official CharacterCreation only rewrites cosmetics and already sends
+     * / the stored keys (or []). Keep the store. upgradeSpell is the sole writer.
+     */
     createCharacter(slot: bigint, character: Character): Promise<{
         __kind__: "ok";
         ok: null;
@@ -671,6 +789,13 @@ export interface backendInterface {
      * / Returns all three ad box slots.  Empty/inactive slots have isActive=false.
      */
     getAdBoxes(): Promise<Array<[string, string, boolean]>>;
+    getAdminAuditLog(): Promise<{
+        __kind__: "ok";
+        ok: Array<AdminAuditEntry>;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     /**
      * / Public: returns all boss configs.
      */
@@ -789,6 +914,10 @@ export interface backendInterface {
      */
     getMessages(): Promise<Array<ChatMessage>>;
     /**
+     * / Player-visible status for the latest request. Never includes a GameKey.
+     */
+    getMyGameKeyPurchaseStatus(): Promise<GameKeyRequest | null>;
+    /**
      * / Returns the caller's purchase history.
      */
     getMyPurchaseHistory(): Promise<Array<PurchaseRecord>>;
@@ -847,15 +976,16 @@ export interface backendInterface {
      */
     getUserUiLayout(): Promise<string>;
     /**
-     * / Seed the names list on first call if it is empty.
+     * / Seed the names list on first call if it is empty. Admin-only — same
+     * / privilege as addEnemyName / deleteEnemyName so a non-admin client
+     * / cannot mutate the pool by calling this directly.
      */
     initDefaultNames(): Promise<void>;
     /**
-     * / Player initiates a purchase — creates a pending record.
-     * / Returns the purchase id so the frontend can track it.
-     * / H5: Accepts all customer fields including proofFileUrl.
+     * / Legacy nine-arg KYC checkout. Replaced by requestGameKeyPurchase.
+     * / Signature kept so older clients fail with a clear #err instead of minting.
      */
-    initiatePurchase(packageId: string, customerName: string, customerSurname: string, customerEmail: string, customerAddress: string, customerCity: string, customerCountry: string, customerPostal: string, proofFileUrl: string): Promise<{
+    initiatePurchase(_packageId: string, _customerName: string, _customerSurname: string, _customerEmail: string, _customerAddress: string, _customerCity: string, _customerCountry: string, _customerPostal: string, _proofFileUrl: string): Promise<{
         __kind__: "ok";
         ok: string;
     } | {
@@ -884,7 +1014,8 @@ export interface backendInterface {
      */
     markChangelogShown(version: string): Promise<void>;
     /**
-     * / Player calls this to trigger auto-completion of their pending purchases.
+     * / Kept so shop remount still calls a no-op credit that honors
+     * / shouldCommitShopCredit (commit only when the wallet actually gained).
      */
     processPendingPurchases(): Promise<bigint>;
     /**
@@ -898,11 +1029,31 @@ export interface backendInterface {
         err: string;
     }>;
     /**
+     * / Player: redeem a 120-char GameKey. Credits the caller, not the requester.
+     */
+    redeemGameKey(code: string): Promise<{
+        __kind__: "ok";
+        ok: bigint;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
      * / Rename a character in the given slot. Costs 100 Doka from the character's balance.
      */
     renameCharacter(slot: bigint, newName: string): Promise<{
         __kind__: "ok";
         ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
+     * / Player: submit a GameKey purchase request (email + consent, optional euro hint).
+     */
+    requestGameKeyPurchase(email: string, emailConsent: boolean, hintedEuroCents: bigint): Promise<{
+        __kind__: "ok";
+        ok: string;
     } | {
         __kind__: "err";
         err: string;
@@ -929,11 +1080,14 @@ export interface backendInterface {
     /**
      * / Save all battle-relevant stats back to a character slot after a battle.
      * / hp may arrive as negative (character was knocked out); it is clamped to 0 before storage.
-     * / C1: dokaBalance parameter is intentionally ignored — Doka is tracked in the
-     * /     per-principal dokaBalances Map only. The dokaBalance field no longer exists
-     * /     on the Character type.
+     * / C1: dokaBalance is stored on the per-principal dokaBalances map (the
+     * /     Character record no longer carries a wallet field). This write may
+     * /     decrease Doka/XP (heal, shop, death) but must not mint — credits
+     * /     go through applyRewards / claim / shop-complete / upgradeSpell.
+     * / Incoming Doka/XP above the stored values are ignored. Level is owned
+     * / by applyRewards — the client level argument is ignored.
      */
-    saveBattleStats(slot: bigint, level: bigint, xp: bigint, hp: bigint, _maxHp: bigint, _ap: bigint, maxAp: bigint, _mp: bigint, maxMp: bigint, attack: bigint, defense: bigint, initiative: bigint, dokaBalance: bigint, spellLevelKeys: Array<string>, spellLevelValues: Array<bigint>): Promise<{
+    saveBattleStats(slot: bigint, _level: bigint, xp: bigint, hp: bigint, _maxHp: bigint, _ap: bigint, maxAp: bigint, _mp: bigint, maxMp: bigint, attack: bigint, defense: bigint, initiative: bigint, dokaBalance: bigint, _spellLevelKeys: Array<string>, _spellLevelValues: Array<bigint>): Promise<{
         __kind__: "ok";
         ok: null;
     } | {
@@ -965,7 +1119,7 @@ export interface backendInterface {
     /**
      * / Append a new message; trims list to at most 200 entries (oldest dropped).
      */
-    sendMessage(playerName: string, text: string, colorHex: string): Promise<void>;
+    sendMessage(_playerName: string, text: string, colorHex: string): Promise<void>;
     /**
      * / Admin-only: sets the current app version string.
      */

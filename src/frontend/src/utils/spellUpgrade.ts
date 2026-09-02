@@ -66,6 +66,11 @@ export function readUpgradeSpellOk(result: unknown): number {
 /**
  * Upgrade a spell on the canister (deducts Doka + writes spellLevelKeys) and
  * optionally read back the new per-principal Doka balance.
+ *
+ * The wallet query is best-effort. upgradeSpell is the source of truth for
+ * the new level; a throwing or missing getCallerDokaBalance must still
+ * return `{ newLevel }` so callers can commit the advertised canister spend
+ * instead of treating a successful write as a failed upgrade.
  */
 export async function persistSpellUpgrade(
   actor: SpellUpgradeActor,
@@ -77,15 +82,22 @@ export async function persistSpellUpgrade(
   if (!actor.getCallerDokaBalance) {
     return { newLevel };
   }
-  const raw = await actor.getCallerDokaBalance();
-  if (raw == null) {
+  try {
+    const raw = await actor.getCallerDokaBalance();
+    if (raw == null) {
+      return { newLevel };
+    }
+    const newDoka = Number(raw);
+    return {
+      newLevel,
+      newDoka: Number.isFinite(newDoka) ? newDoka : undefined,
+    };
+  } catch {
+    // upgradeSpell already committed the level and Doka spend. A throwing
+    // follow-up query used to reject the persist-lock job, so the UI did
+    // not apply the level and the player retried — a second charge.
     return { newLevel };
   }
-  const newDoka = Number(raw);
-  return {
-    newLevel,
-    newDoka: Number.isFinite(newDoka) ? newDoka : undefined,
-  };
 }
 
 /**

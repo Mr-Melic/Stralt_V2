@@ -146,6 +146,21 @@ type LevelUpConfig =
    spellRangeGrowthLevels: nat;
    statGrowthPercent: nat;
  };
+type GameKeyRequest = 
+ record {
+   approvedAt: int;
+   dokaAmount: nat;
+   email: text;
+   emailConsent: bool;
+   emailed: bool;
+   hintedEuroCents: nat;
+   id: text;
+   redeemedAt: int;
+   redeemedBy: text;
+   status: text;
+   timestamp: int;
+   userPrincipal: principal;
+ };
 type EnemyConfig = 
  record {
    ap: nat;
@@ -319,6 +334,13 @@ service : {
                    err: text;
                    ok;
                  });
+  /// Admin: after Mollie payment, set Doka worth and mint a 120-char GameKey
+  /// from IC `raw_rand`. Returns the code once; store it only in the reveal map.
+  adminApproveGameKeyPurchase: (requestId: text, dokaAmount: nat) ->
+   (variant {
+      err: text;
+      ok: text;
+    });
   /// Admin: ban a principal for non-payment.
   /// M2: also clears achievement progress so banned players cannot double-claim
   ///     Doka rewards after being unbanned.
@@ -367,6 +389,12 @@ service : {
       err: text;
       ok: nat;
     }) query;
+  /// Admin: one-time reveal until marked emailed. Empty #err if already wiped.
+  adminGetGameKeyReveal: (requestId: text) ->
+   (variant {
+      err: text;
+      ok: text;
+    }) query;
   /// Admin: get all purchase records, optionally filtered by principal text.
   adminGetPurchaseRecords: (filterPrincipal: opt text) ->
    (variant {
@@ -380,6 +408,23 @@ service : {
       err: text;
       ok;
     });
+  /// Admin: incoming GameKey purchase requests. No plaintext codes.
+  adminListGameKeyRequests: () ->
+   (variant {
+      err: text;
+      ok: vec GameKeyRequest;
+    }) query;
+  /// Admin: confirm the code was copied/mailed. Wipes the plaintext reveal.
+  /// The canister cannot send email; this is the honest hand-off.
+  adminMarkGameKeyEmailed: (requestId: text) -> (variant {
+                                                   err: text;
+                                                   ok;
+                                                 });
+  /// Admin: payment never arrived.
+  adminRejectGameKeyPurchase: (requestId: text) -> (variant {
+                                                      err: text;
+                                                      ok;
+                                                    });
   adminRollbackBossRushConfig: () -> (variant {
                                         err: text;
                                         ok;
@@ -523,6 +568,13 @@ service : {
                          err: text;
                          ok;
                        });
+  /// Appearance edits used to union incoming spell arrays and take
+  /// max(existing, incoming) per id. A custom client could then:
+  ///   1. inject a retired catalog id the player never owned, after which
+  ///      upgradeSpell treats `found=true` and skips the retirement check;
+  ///   2. raise paid levels without going through upgradeSpell.
+  /// Official CharacterCreation only rewrites cosmetics and already sends
+  /// the stored keys (or []). Keep the store. upgradeSpell is the sole writer.
   createCharacter: (slot: nat, character: Character) ->
    (variant {
       err: text;
@@ -646,6 +698,8 @@ service : {
   getMapModifiers: () -> (vec MapModifierConfig) query;
   /// Returns all current chat messages (oldest first).
   getMessages: () -> (vec ChatMessage) query;
+  /// Player-visible status for the latest request. Never includes a GameKey.
+  getMyGameKeyPurchaseStatus: () -> (opt GameKeyRequest) query;
   /// Returns the caller's purchase history.
   getMyPurchaseHistory: () -> (vec PurchaseRecord) query;
   /// Public: return the achievement progress records for the given principal.
@@ -692,16 +746,15 @@ service : {
   /// privilege as addEnemyName / deleteEnemyName so a non-admin client
   /// cannot mutate the pool by calling this directly.
   initDefaultNames: () -> ();
-  /// Player initiates a purchase — creates a pending record.
-  /// Returns the purchase id so the frontend can track it.
-  /// H5: Accepts all customer fields including proofFileUrl.
-  initiatePurchase: (packageId: text, customerName: text, customerSurname:
-   text, customerEmail: text, customerAddress: text, customerCity: text,
-   customerCountry: text, customerPostal: text, proofFileUrl: text) ->
-   (variant {
-      err: text;
-      ok: text;
-    });
+  /// Legacy nine-arg KYC checkout. Replaced by requestGameKeyPurchase.
+  /// Signature kept so older clients fail with a clear #err instead of minting.
+  initiatePurchase: (_packageId: text, _customerName: text, _customerSurname:
+   text, _customerEmail: text, _customerAddress: text, _customerCity: 
+   text, _customerCountry: text, _customerPostal: text, _proofFileUrl:
+   text) -> (variant {
+               err: text;
+               ok: text;
+             });
   isCallerAdmin: () -> (bool) query;
   /// Public query: returns whether a given principal is banned.
   isPlayerBanned: (userPrincipal: principal) -> (bool) query;
@@ -714,7 +767,8 @@ service : {
   /// Called by the frontend after the player dismisses the changelog popup.
   /// Records that the caller has seen the changelog for the given version.
   markChangelogShown: (version: text) -> ();
-  /// Player calls this to trigger auto-completion of their pending purchases.
+  /// Kept so shop remount still calls a no-op credit that honors
+  /// shouldCommitShopCredit (commit only when the wallet actually gained).
   processPendingPurchases: () -> (nat);
   /// Purchase a buff item. Deducts Doka from caller's per-principal balance.
   purchaseBuff: (slot: nat, itemId: text) ->
@@ -722,11 +776,22 @@ service : {
       err: text;
       ok: BuffInventory;
     });
+  /// Player: redeem a 120-char GameKey. Credits the caller, not the requester.
+  redeemGameKey: (code: text) -> (variant {
+                                    err: text;
+                                    ok: nat;
+                                  });
   /// Rename a character in the given slot. Costs 100 Doka from the character's balance.
   renameCharacter: (slot: nat, newName: text) -> (variant {
                                                     err: text;
                                                     ok;
                                                   });
+  /// Player: submit a GameKey purchase request (email + consent, optional euro hint).
+  requestGameKeyPurchase: (email: text, emailConsent: bool, hintedEuroCents:
+   nat) -> (variant {
+              err: text;
+              ok: text;
+            });
   /// Called on player death or boss rush abort. Resets currentRoom to 0.
   resetBossRush: (slot: nat) -> ();
   /// Reset a player's dungeon chain (called on death or chain completion).

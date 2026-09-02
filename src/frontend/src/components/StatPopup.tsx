@@ -130,7 +130,8 @@ export default function StatPopup({
           <button
             type="button"
             onClick={onClose}
-            className="stone-btn-slate"
+            aria-label="Close inspect"
+            className="stone-btn-slate stone-modal-close"
             style={{ width: 28, height: 28, padding: 0, borderRadius: 6 }}
           >
             ✕

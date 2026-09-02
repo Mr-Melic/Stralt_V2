@@ -4,11 +4,13 @@ import {
   activeHostilesRemaining,
   countsTowardKillRewards,
   despawnSummons,
+  enemyDestToCommit,
   enemyHpAfterHazardDamage,
   isActiveHostile,
   liveCombatantHp,
   shouldAdvanceAfterEnemyTurn,
   shouldAwardVictory,
+  shouldTriggerOverworldEncounter,
 } from "./battleSetup.ts";
 import { expireSummonsAtTurnStart } from "./summonLifespan.ts";
 
@@ -82,6 +84,41 @@ describe("isActiveHostile", () => {
     assert.deepEqual(
       after.map((e) => e.id),
       ["rat"],
+    );
+  });
+
+  it("Boss Rush room-clear leftovers must not start an overworld fight", () => {
+    // handleBattleEnd already despawnSummons. handleBossRushRoomClear used
+    // to skip that, so walking onto the wolf (or sharing its tile) started
+    // a 0-hostile encounter that immediately awarded applyRewards.
+    const leftovers = [
+      { id: "boss", hp: 0, isSummon: false, side: "enemy" as const },
+      {
+        id: "wolf",
+        hp: 40,
+        isSummon: true,
+        side: "player" as const,
+        x: 4,
+        y: 4,
+      },
+    ];
+    const afterClear = despawnSummons(leftovers);
+    assert.equal(
+      afterClear.some((c) => c.isSummon),
+      false,
+    );
+    assert.equal(shouldTriggerOverworldEncounter(leftovers[1]), false);
+    assert.equal(shouldTriggerOverworldEncounter(leftovers[0]), false);
+    assert.equal(
+      shouldTriggerOverworldEncounter({
+        id: "wanderer",
+        hp: 12,
+        isSummon: false,
+        side: "enemy",
+        x: 4,
+        y: 4,
+      }),
+      true,
     );
   });
 });
@@ -267,5 +304,26 @@ describe("shouldAdvanceAfterEnemyTurn", () => {
       false,
       "advanceTurn must not require an expire list — player End Turn and the 30s timer still fire after a last-hit",
     );
+  });
+});
+
+describe("enemyDestToCommit", () => {
+  it("returns a clamped patch when the AI dest leaves the origin tile", () => {
+    assert.deepEqual(enemyDestToCommit({ x: 4, y: 4 }, { x: 6, y: 3 }, 12), {
+      x: 6,
+      y: 3,
+    });
+  });
+
+  it("returns null when dest equals origin so stay-put skips stay no-ops", () => {
+    assert.equal(enemyDestToCommit({ x: 2, y: 2 }, { x: 2, y: 2 }, 12), null);
+    assert.equal(enemyDestToCommit({ x: 2, y: 2 }, null, 12), null);
+  });
+
+  it("clamps dest onto the grid instead of writing out-of-bounds tiles", () => {
+    assert.deepEqual(enemyDestToCommit({ x: 0, y: 0 }, { x: -3, y: 99 }, 12), {
+      x: 0,
+      y: 11,
+    });
   });
 });

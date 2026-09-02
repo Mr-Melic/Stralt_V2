@@ -2,6 +2,7 @@ import type React from "react";
 import { useEffect, useRef } from "react";
 import {
   isStarfieldPaused,
+  planStarfieldLoop,
   subscribeStarfieldPaused,
 } from "../engine/starfieldActivity";
 
@@ -123,9 +124,21 @@ const StarfieldBackground: React.FC = () => {
 
     const myGen = ++starGenRef.current;
 
+    const currentPlan = () =>
+      planStarfieldLoop({
+        worldPaused: isStarfieldPaused(),
+        documentHidden: document.hidden,
+      });
+
+    const releaseGpuBuffer = () => {
+      canvas.width = 1;
+      canvas.height = 1;
+      starsRef.current = [];
+    };
+
     const animate = () => {
       if (starGenRef.current !== myGen) return;
-      if (isStarfieldPaused() || document.hidden) {
+      if (currentPlan() !== "run") {
         animationFrameRef.current = null;
         return;
       }
@@ -192,12 +205,13 @@ const StarfieldBackground: React.FC = () => {
     resizeCanvas();
     createStars();
 
-    // M-6: ResizeObserver keeps the starfield canvas in sync with the game
-    // canvas on resize events. A size mismatch between the two canvases creates
-    // GPU memory pressure that can trigger context loss on the game canvas.
+    // M-6: while the starfield is visible, keep the backing store in sync
+    // with CSS size. While WorldExploration covers it, skip this poke so a
+    // mobile rotate does not allocate a second full-size 2D buffer.
     const starfieldCanvas = canvasRef.current;
     const resizeObserver = new ResizeObserver(() => {
       if (!canvasRef.current) return;
+      if (currentPlan() !== "run") return;
       const { clientWidth, clientHeight } = canvasRef.current;
       if (clientWidth > 0 && clientHeight > 0) {
         canvasRef.current.width = clientWidth;
@@ -218,20 +232,32 @@ const StarfieldBackground: React.FC = () => {
 
     const startLoop = () => {
       if (starGenRef.current !== myGen) return;
-      if (isStarfieldPaused() || document.hidden) return;
+      if (currentPlan() !== "run") return;
       if (animationFrameRef.current !== null) return;
       animationFrameRef.current = requestAnimationFrame(animate);
     };
 
+    // PERF-2026-09-02-049: while WorldExploration covers this canvas, drop the
+    // full-size backing store and skip createStars on resize. Tab-hidden on
+    // landing only stops RAF and keeps the star list for a cheap resume.
     const syncLoop = () => {
-      if (isStarfieldPaused() || document.hidden) {
+      const plan = currentPlan();
+      if (plan === "pause_release_gpu") {
+        stopLoop();
+        releaseGpuBuffer();
+        return;
+      }
+      if (plan === "pause_keep_buffer") {
         stopLoop();
         return;
       }
+      resizeCanvas();
+      if (starsRef.current.length === 0) createStars();
       startLoop();
     };
 
     const handleResize = () => {
+      if (currentPlan() !== "run") return;
       resizeCanvas();
       createStars();
     };

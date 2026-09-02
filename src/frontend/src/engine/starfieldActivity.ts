@@ -25,3 +25,25 @@ export function subscribeStarfieldPaused(listener: Listener): () => void {
     listeners.delete(listener);
   };
 }
+
+/**
+ * What the root starfield should do this frame / on a visibility or pause flip.
+ * `pause_release_gpu`: world canvas covers the starfield — drop the backing
+ * store and star list so a mobile rotate during play does not allocate ~250
+ * stars or a second full-size 2D buffer (PERF-2026-09-02-049).
+ * `pause_keep_buffer`: tab is hidden on landing/select — stop RAF but keep
+ * the star list so resume is a single frame, not a createStars hitch.
+ */
+export type StarfieldLoopPlan =
+  | "run"
+  | "pause_keep_buffer"
+  | "pause_release_gpu";
+
+export function planStarfieldLoop(input: {
+  worldPaused: boolean;
+  documentHidden: boolean;
+}): StarfieldLoopPlan {
+  if (input.worldPaused) return "pause_release_gpu";
+  if (input.documentHidden) return "pause_keep_buffer";
+  return "run";
+}

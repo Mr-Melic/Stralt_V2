@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Enemy, SpellConfig } from "../types/gameTypes.ts";
 import {
+  applyHealBuffSideEffect,
   attackNearestLiveCasterPos,
   canAttackNearestLive,
   computeTargetableTiles,
   isTileCastableLive,
   pickNearestLiveHostileTile,
+  shouldApplyHealBuffSideEffectOnRangePreview,
   shouldExecuteLiveCast,
   spellHighlightRangeBase,
 } from "./targeting.ts";
@@ -499,5 +501,79 @@ describe("Attack Nearest live gate", () => {
       ),
       false,
     );
+  });
+});
+
+describe("pacifist flag stays off the range-preview path", () => {
+  it("computeTargetableTiles does not flip the pacifist ref", () => {
+    const tiles = floorGrid(16);
+    const pacifist = { current: true };
+    computeTargetableTiles(
+      strikeSpell(),
+      { x: 4, y: 4 },
+      {
+        tiles,
+        enemies: [
+          {
+            id: "rat",
+            x: 5,
+            y: 4,
+            hp: 10,
+            maxHp: 10,
+            name: "Rat",
+            pieceType: "pawn",
+          } as Enemy,
+        ],
+        worldGridSize: 16,
+        effectiveRange: 1,
+        barrierTiles: new Map(),
+      },
+    );
+    assert.equal(pacifist.current, true);
+  });
+
+  it("applyHealBuffSideEffect flips only when a caller opts in (cast path)", () => {
+    const afterPreview = { current: true };
+    applyHealBuffSideEffect(
+      {
+        id: "starter-heal",
+        name: "Blood Mend",
+        description: "",
+        iconEmoji: "",
+        apCost: 3n,
+        mpCost: 0n,
+        damage: 0n,
+        range: 0n,
+        effectType: "heal",
+        targetType: "self",
+      } as SpellConfig,
+      afterPreview,
+    );
+    assert.equal(afterPreview.current, true);
+
+    const afterStrike = { current: true };
+    applyHealBuffSideEffect(strikeSpell(), afterStrike);
+    assert.equal(afterStrike.current, false);
+  });
+});
+
+describe("Pacifist Run highlight vs cast", () => {
+  it("does not flip Pacifist when the player only paints spell range", () => {
+    assert.equal(shouldApplyHealBuffSideEffectOnRangePreview(), false);
+    const ref = { current: true };
+    if (shouldApplyHealBuffSideEffectOnRangePreview()) {
+      applyHealBuffSideEffect(strikeSpell(), ref);
+    }
+    assert.equal(
+      ref.current,
+      true,
+      "getSpellRangeTiles used to call applyHealBuffSideEffect and fail Pacifist on preview",
+    );
+  });
+
+  it("still flips Pacifist on an offensive cast", () => {
+    const ref = { current: true };
+    applyHealBuffSideEffect(strikeSpell(), ref);
+    assert.equal(ref.current, false);
   });
 });

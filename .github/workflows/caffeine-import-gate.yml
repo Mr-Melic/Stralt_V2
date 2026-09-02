@@ -1,6 +1,8 @@
-# Mirrors the Caffeine GitHub → import frontend gate in src/frontend/caffeine.toml [check]:
-#   pnpm typecheck && pnpm check   # biome check src
-# Backend Motoko is `caffeine check` / `mops check` (not duplicated here).
+# Same commands Caffeine GitHub → import uses.
+# Frontend: src/frontend/caffeine.toml [check] = pnpm typecheck && pnpm check
+#            [build] = pnpm build (vite/esbuild; duplicate exports)
+# Backend:  src/backend/caffeine.toml [check] = mops check
+# Do not run caffeine build / mops build (PocketIC / dfx). Do not skip.
 name: Caffeine import gate
 
 on:
@@ -8,7 +10,36 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: caffeine-import-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
+  open-pr-stack:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove merge-tree conflict detection
+        run: bash scripts/open-pr-stack-compat.sh --self-test
+      - name: Oldest-first open PR stack
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            bash scripts/open-pr-stack-compat.sh --self
+          else
+            bash scripts/open-pr-stack-compat.sh --queue
+          fi
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -21,5 +52,25 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Typecheck and Biome (Caffeine frontend [check])
-        run: pnpm typecheck && pnpm check
+      - name: Typecheck, Biome, duplicate-export scan, vite build
+        run: bash scripts/caffeine-import-gate.sh frontend
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/mops
+            .mops
+          key: ${{ runner.os }}-mops-${{ hashFiles('mops.lock', 'mops.toml') }}
+      - name: Install ic-mops
+        run: npm install -g ic-mops@3.2.0
+      - name: Install Motoko packages (locked)
+        run: mops install --locked
+      - name: Motoko check (deployed .old + snapshots/deployed EOP baselines + frozen NewActor)
+        run: bash scripts/caffeine-import-gate.sh backend -- --locked

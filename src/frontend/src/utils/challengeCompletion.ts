@@ -33,6 +33,12 @@ export interface ChallengePanelProgress {
   healUsed: boolean;
   directHit: boolean;
   maxApUsedInTurn: number;
+  /**
+   * Spent cast / fizzle / summon attempts that consulted Striker range.
+   * `directHit` starts true (no long-range miss yet). A lava / reflect /
+   * wait win never increments this, so legendary_3 must not persist.
+   */
+  directHitAttempts?: number;
 }
 
 export const DEFAULT_CHALLENGES: Challenge[] = [
@@ -124,7 +130,7 @@ export function isChallengeCompleted(
     case "under_5_turns":
       return progress.turnCount <= 5;
     case "direct_hit":
-      return progress.directHit;
+      return isStrikerChallengeComplete(progress);
     default:
       return false;
   }
@@ -210,6 +216,47 @@ export function recordInBattleChallengeHealUsed(
 ): boolean {
   if (!inBattle) return alreadyUsed === true;
   return true;
+}
+
+/**
+ * BuffShop `health_potion` / `greater_health_potion` restore HP on the
+ * player turn (`handleUse` requires inBattle). handleUseItem used to skip
+ * `challengeHealUsedRef`, so easy_1 (50 Doka) and hard_1 (200 Doka / 500 XP)
+ * still persisted after a mid-fight potion. Spell heals and in-battle
+ * Doka-to-HP already flip the flag.
+ *
+ * Pass the live in-battle flag — the same overworld-must-not-stick rule as
+ * {@link recordInBattleChallengeHealUsed}.
+ */
+export function recordChallengeItemHealUsed(
+  inBattle: boolean,
+  alreadyUsed: boolean,
+): boolean {
+  return recordInBattleChallengeHealUsed(inBattle, alreadyUsed);
+}
+
+/** Player combatant ids that restore the character strip, not a summon. */
+export function isPlayerHealTargetId(id: string | undefined | null): boolean {
+  return id === "player" || id === "__player__";
+}
+
+/**
+ * Life Drain (`applyDamageToEnemy`) and summon/ctx.heal restore player HP
+ * without the executeCastAttempt `self` + `heal` gate. handleBattleEnd then
+ * persisted easy_1 (50 Doka) and hard_1 (200 Doka / 500 XP) as a clean
+ * no-heal fight. Record only when HP actually increased, and only in battle
+ * — the same overworld-must-not-stick rule as Doka-to-HP.
+ */
+export function recordChallengeHealFromHpRestore(
+  inBattle: boolean,
+  alreadyUsed: boolean,
+  restoredHp: number,
+): boolean {
+  const restored = Number(restoredHp);
+  if (!inBattle || !Number.isFinite(restored) || restored <= 0) {
+    return alreadyUsed === true;
+  }
+  return recordInBattleChallengeHealUsed(true, alreadyUsed);
 }
 
 /**
@@ -304,7 +351,7 @@ export function castResultAppliesCooldown(result: string): boolean {
 }
 
 /**
- * BattleUIPanel / SpellFooter only disable re-selection. Sprite-click,
+ * BattleUIPanel only disables re-selection. Sprite-click,
  * tile-click, and Attack Nearest keep the spell selected when leftover
  * AP remains, so Inferno (5 AP / 3-turn CD) could be recast every click
  * until AP ran out, then every later turn, without ever consulting the
@@ -349,6 +396,38 @@ export function recordChallengeDirectHit(
   return Math.max(dx, dy) <= 2;
 }
 
+export type DirectHitChallengeState = {
+  stillDirect: boolean;
+  attempts: number;
+};
+
+/**
+ * Count a spent spell attempt toward Striker. `recordChallengeDirectHit`
+ * alone left attempts at 0, so a no-cast victory still read
+ * `directHit === true` and persisted 400 Doka / 800 XP.
+ */
+export function applyChallengeDirectHit(
+  state: DirectHitChallengeState,
+  caster: { x: number; y: number },
+  target: { x: number; y: number },
+): DirectHitChallengeState {
+  return {
+    stillDirect: recordChallengeDirectHit(state.stillDirect, caster, target),
+    attempts: Math.max(0, Math.floor(Number(state.attempts) || 0)) + 1,
+  };
+}
+
+/** legendary_3: every spent attempt in range, and at least one attempt. */
+export function isStrikerChallengeComplete(progress: {
+  directHit: boolean;
+  directHitAttempts?: number;
+}): boolean {
+  return (
+    progress.directHit === true &&
+    Math.max(0, Math.floor(Number(progress.directHitAttempts) || 0)) > 0
+  );
+}
+
 /**
  * True when the condition can no longer be satisfied this battle
  * (banner chip should flip to ✗). "under_N_turns" challenges are only
@@ -380,5 +459,25 @@ export function isChallengeFailed(
       return !progress.directHit;
     default:
       return false;
+  }
+}
+
+/** Player-facing reason when the mid-fight banner is already failed. */
+export function challengeFailCopy(challenge: Challenge): string {
+  switch (challenge.condition) {
+    case "no_healing":
+      return "Failed — a heal was used";
+    case "under_50_damage":
+      return "Failed — damage taken reached 50";
+    case "no_healing_under_30_damage":
+      return "Failed — heal used or damage reached 30";
+    case "under_8_ap_per_turn":
+      return "Failed — more than 8 AP spent in one turn";
+    case "no_damage_taken":
+      return "Failed — damage was taken";
+    case "direct_hit":
+      return "Failed — a spell landed beyond 2 tiles";
+    default:
+      return "Failed!";
   }
 }

@@ -132,7 +132,7 @@ describe("persistBossRushRoomClear", () => {
     assert.deepEqual(calls, ["progress:2:1", "complete:2:0:0:0"]);
   });
 
-  it("resets currentRoom before recording the final-room complete", async () => {
+  it("records the final-room complete while still occupying room 9, then resets", async () => {
     const calls: string[] = [];
     await persistBossRushRoomClear(
       {
@@ -149,7 +149,38 @@ describe("persistBossRushRoomClear", () => {
       1,
       9,
     );
-    assert.deepEqual(calls, ["reset:1", "complete:9"]);
+    assert.deepEqual(calls, ["complete:9", "reset:1"]);
+  });
+
+  it("lands master progress once; reset-first complete(9) used to #err forever", async () => {
+    let currentRoom = 9;
+    let master = false;
+    let runs = 0;
+    const actor = {
+      resetBossRush: async () => {
+        currentRoom = 0;
+      },
+      completeBossRushRoom: async (_slot: bigint, roomIndex: bigint) => {
+        const ri = Number(roomIndex);
+        if (ri !== currentRoom && ri + 1 !== currentRoom) {
+          return { err: "roomIndex must match current Boss Rush room" };
+        }
+        if (ri === 9 && currentRoom === 9) {
+          master = true;
+          runs += 1;
+          currentRoom = 0;
+        }
+        return { ok: null };
+      },
+    };
+    await persistBossRushRoomClear(actor, 1, 9);
+    assert.equal(master, true);
+    assert.equal(runs, 1);
+    assert.equal(currentRoom, 0);
+
+    await persistBossRushRoomClear(actor, 1, 9);
+    assert.equal(runs, 1, "repeat complete(9) after reset must not farm runs");
+    assert.equal(currentRoom, 0);
   });
 
   it("re-resets currentRoom when death aborts the run during the persist", async () => {

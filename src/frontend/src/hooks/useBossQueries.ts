@@ -29,16 +29,3 @@ export function useGetAllBossConfigs() {
     gcTime: 120000,
   });
 }
-
-export function useGetBossConfig(id: string) {
-  return useQuery<BossConfig | null>({
-    queryKey: ["bossConfig", id],
-    queryFn: () => {
-      const all = loadBossConfigs();
-      return all.find((b) => b.id === id) ?? null;
-    },
-    staleTime: 30000,
-    gcTime: 120000,
-    enabled: !!id,
-  });
-}

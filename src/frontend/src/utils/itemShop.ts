@@ -12,6 +12,11 @@ export function isBuffShopOpen(isOpen: boolean | undefined): boolean {
   return isOpen === true;
 }
 
+/** HP potions are the only BuffShop items that count as challenge healing. */
+export function isBuffShopHealItem(itemType: string): boolean {
+  return itemType === "health_potion" || itemType === "greater_health_potion";
+}
+
 export function nextDokaAfterShopSpend(
   currentDoka: number,
   amount: number,
@@ -140,6 +145,13 @@ export function tryPurchaseBuffItem(
     nextWallet: wallet - cost,
     nextOwned: owned + 1,
   };
+}
+
+/** Consume from inventoryRef so a double-click cannot spend one stack twice. */
+export function tryConsumeBuffItem(owned: number): number | null {
+  const count = toNat(owned);
+  if (count <= 0) return null;
+  return count - 1;
 }
 
 export type OverworldHealSpendInput = {
@@ -276,7 +288,10 @@ export function syncLiveDokaFromProp(args: {
   const prev = Math.max(0, Math.floor(Number(args.prevPropDoka) || 0));
   const live = Math.max(0, Math.floor(Number(args.liveDoka) || 0));
   if (prev !== prop) {
-    return { liveDoka: prop, prevPropDoka: prop };
+    if (live === prev) {
+      return { liveDoka: prop, prevPropDoka: prop };
+    }
+    return { liveDoka: live, prevPropDoka: prop };
   }
   return { liveDoka: live, prevPropDoka: prev };
 }
@@ -354,4 +369,38 @@ export function applyHealHpToLiveStats<T extends { hp: number }>(
   const next = { ...stats.current, hp };
   stats.current = next;
   return next;
+}
+
+/**
+ * Credits, spends, and death cuts must write the live ref in the same
+ * tick as onDokaBalanceChange. GameFlow's setState is deferred; a later
+ * heal/shop/rename still reads dokaBalanceRef.
+ */
+export function writeLiveDoka(live: { current: number }, next: number): number {
+  const value = Math.max(0, Math.floor(Number(next) || 0));
+  live.current = value;
+  return value;
+}
+
+/** Add a persist-lock credit onto the live wallet, not a click-time snapshot. */
+export function creditLiveDoka(
+  live: { current: number },
+  gained: number,
+): number {
+  const add = Math.max(0, Math.floor(Number(gained) || 0));
+  return writeLiveDoka(live, live.current + add);
+}
+
+/**
+ * A failed shop persist must not add `amount` back if a later buy/heal
+ * already moved the live wallet. Double-buy: first reject after the second
+ * commit used to restore +50 onto 0 and mint a ghost 50 for the next heal.
+ */
+export function shouldRollbackFailedShopSpend(args: {
+  liveDoka: number;
+  expectedDoka: number;
+}): boolean {
+  const live = Math.max(0, Math.floor(Number(args.liveDoka) || 0));
+  const expected = Math.max(0, Math.floor(Number(args.expectedDoka) || 0));
+  return live === expected;
 }

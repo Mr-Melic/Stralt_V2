@@ -254,4 +254,36 @@ describe("turn-start void rift store write", () => {
       "store write + processCombatantDeath must award so applyRewards can run",
     );
   });
+
+  it("player-side summon control must commit Void Rift like enemy summons", () => {
+    // Control-mode turn start used to call applyTurnStart only (turn-order
+    // entry mutation). Store HP stayed full, so a ≤3 HP Wolf never died and
+    // kept acting while enemy minions correctly took the −3 tick.
+    const wolf = {
+      ...enemy("wolf-1", 3),
+      isSummon: true,
+      side: "player" as const,
+    };
+    const ctx = store([wolf]);
+    assert.equal(ctx.combatantsRef.current[0]?.hp, 3);
+
+    const { newHp, lethal } = enemyHpAfterHazardDamage(3, VOID_RIFT_TICK);
+    updateCombatant(ctx, "wolf-1", { hp: newHp });
+    if (lethal) removeCombatant(ctx, "wolf-1");
+
+    assert.equal(lethal, true);
+    assert.equal(
+      ctx.combatantsRef.current.find((c) => c.id === "wolf-1"),
+      undefined,
+      "player-summon Void Rift ≤3 HP must processCombatantDeath via store write",
+    );
+    assert.equal(
+      shouldDispatchEnemyAiAfterTurnStart({
+        stillInStore: false,
+        storeHp: 0,
+      }),
+      false,
+      "lethal Void Rift on a controlled summon must not keep control mode",
+    );
+  });
 });

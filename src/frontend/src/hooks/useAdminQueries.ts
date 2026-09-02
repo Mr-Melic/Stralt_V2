@@ -7,7 +7,12 @@ import type {
   MapModifierConfig,
 } from "../types/gameTypes";
 import { assertAdminCmdOk } from "../utils/adminContract";
-import { validateAssignRole, validateEnemyName } from "../utils/adminSafety";
+import {
+  validateAchievementConfig,
+  validateAssignRole,
+  validateEnemyName,
+  validateMapModifierChance,
+} from "../utils/adminSafety";
 import { normalizeCallerDokaBalance } from "../utils/dokaBalanceQuery";
 import { fetchPlayerAchievements } from "../utils/playerAchievements";
 import { useActor } from "./useActor";
@@ -192,6 +197,8 @@ export function useAdminSetMapModifierChance() {
   return useMutation({
     mutationFn: async ({ id, chance }: { id: string; chance: number }) => {
       if (!actor) throw new Error("Actor not available");
+      const chanceErr = validateMapModifierChance(id, chance);
+      if (chanceErr) throw new Error(chanceErr);
       const result = await (actor as ActorAny).adminSetMapModifierChance(
         id,
         BigInt(Math.round(chance)),
@@ -309,20 +316,29 @@ export function useGetPlayerAchievements() {
         );
         // [FEATS] LIST — log the refetched claimed flag per achievement so
         // the chain shows the post-claim/unlock state from the backend.
-        console.log("[FEATS] LIST", {
-          count: mapped.length,
-          claimed: mapped.map((p) => ({
-            achievementId: p.achievementId,
-            claimed: p.claimed,
-          })),
-        });
+        // PERF-2026-09-02-050: keep this off the production hot path. The
+        // hook is subscribed inside WorldExploration; a focus refetch with
+        // staleTime 0 re-rendered the whole world tree and allocated a
+        // claimed[] map on every tab focus.
+        if (import.meta.env.DEV) {
+          console.log("[FEATS] LIST", {
+            count: mapped.length,
+            claimed: mapped.map((p) => ({
+              achievementId: p.achievementId,
+              claimed: p.claimed,
+            })),
+          });
+        }
         return mapped;
       } catch {
         return [];
       }
     },
     enabled: !!actor && !actorFetching && !!player,
-    staleTime: 0,
+    // PERF-2026-09-02-050: unlock/claim mutations already invalidate this key.
+    // Do not refetch on every window focus while the world canvas is mounted.
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
     gcTime: 60000,
   });
 }
@@ -389,6 +405,8 @@ export function useAdminSetAchievementConfig() {
   return useMutation({
     mutationFn: async (config: AchievementConfig) => {
       if (!actor) throw new Error("Actor not available");
+      const guardErr = validateAchievementConfig(config);
+      if (guardErr) throw new Error(guardErr);
       const result = await (actor as ActorAny).adminSetAchievementConfig({
         ...config,
         dokaReward: BigInt(Math.round(config.dokaReward)),
