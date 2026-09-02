@@ -1,0 +1,1495 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+/* DOFUS-style design system variables */
+:root {
+  --dofus-bg-primary: 0.05 0 0;
+  --dofus-bg-panel: 0.08 0 0;
+  --dofus-bg-panel-dark: 0.04 0 0;
+  --dofus-border-gold: 0.52 0.25 29;
+  --dofus-border-gold-dim: 0.32 0.15 29;
+  --dofus-text-gold: 0.65 0.22 29;
+  --dofus-text-silver: 0.8 0.08 250;
+  --dofus-text-dim: 0.45 0.06 250;
+  --dofus-ap-color: 0.55 0.18 262;
+  --dofus-mp-color: 0.52 0.2 150;
+  --dofus-hp-color: 0.55 0.25 29;
+  --dofus-xp-color: 0.5 0.22 310;
+  --dofus-accent-glow: rgba(192, 57, 43, 0.3);
+
+  --font-display: "Baloo 2", system-ui, sans-serif;
+  --font-body: "Saira", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --accent: 0.55 0.2 25;
+  --accent-foreground: 0.98 0.005 25;
+  --background: 0.08 0.01 260;
+  --border: 0.22 0.03 260;
+  --card: 0.12 0.01 260;
+  --card-foreground: 0.92 0.01 280;
+  --destructive: 0.42 0.18 25;
+  --destructive-foreground: 0.98 0.005 25;
+  --foreground: 0.92 0.01 280;
+  --input: 0.15 0.02 260;
+  --input-foreground: 0.92 0.01 280;
+  --muted: 0.22 0.02 260;
+  --muted-foreground: 0.55 0.04 280;
+  --popover: 0.1 0.01 260;
+  --popover-foreground: 0.92 0.01 280;
+  --primary: 0.55 0.2 25;
+  --primary-foreground: 0.98 0.005 25;
+  --ring: 0.55 0.2 25;
+  --secondary: 0.18 0.02 260;
+  --secondary-foreground: 0.85 0.01 260;
+  --success: 0.55 0.18 150;
+  --success-foreground: 0.08 0.01 150;
+  --warning: 0.72 0.16 85;
+  --warning-foreground: 0.08 0.01 85;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: var(--font-body);
+  }
+
+  html,
+  body,
+  #root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    background: oklch(var(--background));
+    color: oklch(var(--foreground));
+    line-height: 1.6;
+    overscroll-behavior: none;
+  }
+}
+
+@layer components {
+  .isometric-tile {
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+
+  .dungeon-grid {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .room-preview {
+    aspect-ratio: 1;
+    background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+    border-radius: 0.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .room-preview::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 2px,
+      rgba(255, 255, 255, 0.1) 2px,
+      rgba(255, 255, 255, 0.1) 4px
+    );
+  }
+
+  .tool-button {
+    @apply transition-all duration-200 ease-in-out;
+  }
+
+  .tool-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .tool-button.active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+}
+
+@layer components {
+  .dofus-panel {
+    background: linear-gradient(
+      135deg,
+      oklch(var(--dofus-bg-panel)) 0%,
+      oklch(var(--dofus-bg-primary)) 100%
+    );
+    border: 1px solid oklch(var(--dofus-border-gold-dim));
+    box-shadow: 0 0 15px oklch(var(--dofus-border-gold) / 0.15), inset 0 1px 0
+      oklch(var(--dofus-border-gold) / 0.1);
+  }
+  .dofus-panel-header {
+    background: linear-gradient(
+      90deg,
+      oklch(0.1 0 0) 0%,
+      oklch(var(--dofus-bg-primary)) 100%
+    );
+    border-bottom: 1px solid oklch(var(--dofus-border-gold-dim));
+    padding: 6px 10px;
+  }
+  .dofus-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+  }
+  .dofus-stat-label {
+    color: oklch(var(--dofus-text-dim));
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .dofus-stat-value {
+    color: oklch(var(--dofus-text-silver));
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .dofus-orb {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    border: 2px solid;
+    box-shadow: 0 0 10px currentColor, inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    flex-shrink: 0;
+    position: relative;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .dofus-orb:hover {
+    transform: scale(1.08);
+    box-shadow: 0 0 18px currentColor, inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+  .dofus-orb-lg {
+    width: 56px;
+    height: 56px;
+  }
+  .dofus-ap-orb {
+    background: radial-gradient(
+      circle at 35% 35%,
+      oklch(0.5 0.2 262),
+      oklch(0.2 0.08 262)
+    );
+    border-color: oklch(var(--dofus-ap-color));
+    color: oklch(0.72 0.15 262);
+  }
+  .dofus-mp-orb {
+    background: radial-gradient(
+      circle at 35% 35%,
+      oklch(0.5 0.18 150),
+      oklch(0.2 0.08 150)
+    );
+    border-color: oklch(var(--dofus-mp-color));
+    color: oklch(0.72 0.15 150);
+  }
+  .dofus-hp-orb {
+    background: radial-gradient(
+      circle at 35% 35%,
+      oklch(0.5 0.22 29),
+      oklch(0.2 0.1 29)
+    );
+    border-color: oklch(var(--dofus-hp-color));
+    color: oklch(0.72 0.18 29);
+  }
+  .dofus-portrait-frame {
+    border: 2px solid oklch(var(--dofus-border-gold));
+    border-radius: 6px;
+    box-shadow: 0 0 12px oklch(var(--dofus-border-gold) / 0.25), inset 0 0 8px
+      oklch(0 0 0 / 0.6);
+    background: linear-gradient(
+      135deg,
+      oklch(var(--dofus-bg-panel-dark)) 0%,
+      oklch(var(--dofus-bg-panel)) 100%
+    );
+    overflow: hidden;
+    position: relative;
+  }
+  .dofus-portrait-frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      135deg,
+      oklch(var(--dofus-border-gold) / 0.05) 0%,
+      transparent 60%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+  .dofus-xp-bar {
+    height: 6px;
+    background: oklch(var(--dofus-xp-color) / 0.18);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid oklch(var(--dofus-xp-color) / 0.25);
+  }
+  .dofus-xp-bar-fill {
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      oklch(0.48 0.22 310),
+      oklch(0.52 0.22 310),
+      oklch(0.56 0.2 310)
+    );
+    border-radius: 3px;
+    transition: width 0.5s ease;
+    box-shadow: 0 0 6px oklch(var(--dofus-xp-color) / 0.7);
+  }
+  .dofus-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .dofus-badge-red-accent {
+    background: oklch(var(--dofus-border-gold) / 0.18);
+    border: 1px solid oklch(var(--dofus-border-gold-dim));
+    color: oklch(var(--dofus-text-gold));
+  }
+  .dofus-badge-gold {
+    background: oklch(var(--dofus-border-gold) / 0.18);
+    border: 1px solid oklch(var(--dofus-border-gold-dim));
+    color: oklch(var(--dofus-text-gold));
+  }
+  .dofus-badge-blue {
+    background: oklch(0.55 0.18 262 / 0.18);
+    border: 1px solid oklch(0.4 0.14 262 / 0.6);
+    color: oklch(0.72 0.15 262);
+  }
+  .dofus-badge-red {
+    background: oklch(0.55 0.25 29 / 0.18);
+    border: 1px solid oklch(0.4 0.18 29 / 0.6);
+    color: oklch(0.72 0.18 29);
+  }
+  .dofus-spell-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    position: relative;
+    background: oklch(0.96 0 0 / 0.04);
+    border: 1px solid oklch(var(--dofus-border-gold-dim));
+  }
+  .dofus-spell-card:hover {
+    background: oklch(var(--dofus-border-gold) / 0.1);
+    border-color: oklch(var(--dofus-border-gold));
+    box-shadow: 0 0 8px oklch(var(--dofus-border-gold) / 0.2);
+    transform: translateY(-1px);
+  }
+  .dofus-spell-card.selected {
+    background: oklch(var(--dofus-border-gold) / 0.22);
+    border-color: oklch(var(--dofus-border-gold));
+    box-shadow: 0 0 12px var(--dofus-accent-glow);
+  }
+  .dofus-spell-card.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .dofus-turn-timer {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    flex-shrink: 0;
+  }
+  .dofus-turn-timer svg {
+    transform: rotate(-90deg);
+  }
+  .dofus-turn-timer-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 800;
+    color: oklch(var(--dofus-text-gold));
+  }
+  .dofus-turn-indicator {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 4px;
+  }
+  .dofus-turn-indicator.player {
+    color: oklch(0.96 0 0);
+    background: oklch(0.55 0.18 262 / 0.12);
+    border: 1px solid oklch(0.55 0.18 262 / 0.3);
+    text-shadow: 0 0 10px oklch(0.72 0.15 262 / 0.4);
+  }
+  .dofus-turn-indicator.enemy {
+    color: oklch(0.72 0.18 29);
+    background: oklch(0.55 0.25 29 / 0.12);
+    border: 1px solid oklch(0.55 0.25 29 / 0.3);
+    text-shadow: 0 0 10px oklch(0.72 0.18 29 / 0.4);
+  }
+  .dofus-section-header {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: oklch(var(--dofus-text-gold));
+    padding: 5px 10px 4px;
+    background: linear-gradient(
+      90deg,
+      oklch(var(--dofus-border-gold) / 0.1) 0%,
+      transparent 100%
+    );
+    border-bottom: 1px solid oklch(var(--dofus-border-gold) / 0.15);
+    margin-bottom: 8px;
+  }
+  .dofus-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .dofus-scrollbar::-webkit-scrollbar-track {
+    background: oklch(var(--dofus-bg-panel-dark));
+  }
+  .dofus-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(var(--dofus-border-gold-dim));
+    border-radius: 2px;
+  }
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/fonts/JetBrainsMono.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+@layer utilities {
+  /* ── Carved-stone frame (panels, modals, cards) ─────────────────────── */
+  .stone-frame {
+    padding: 2px;
+    border-radius: 14px;
+    background: linear-gradient(160deg, #48343c 0%, #241a20 40%, #14101a 100%);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55), inset 0 1px 0
+      rgba(255, 255, 255, 0.1);
+  }
+
+  /* ── Inner well (recessed surface inside a carved frame) ─────────────── */
+  .stone-well {
+    border-radius: 12px;
+    background: linear-gradient(180deg, #1d2230, #13161f 60%, #0f121a);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), inset 0 0 0 1px
+      rgba(0, 0, 0, 0.5);
+  }
+
+  /* ── Engraved crimson header bar ──────────────────────────────────────── */
+  .stone-header {
+    position: relative;
+    background: linear-gradient(180deg, #2c1820, #1b1018);
+    border-bottom: 1px solid rgba(216, 70, 63, 0.3);
+    padding-left: 14px;
+  }
+  .stone-header::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(180deg, #ff7a6e, #d8463f);
+    box-shadow: 0 0 8px rgba(216, 70, 63, 0.6);
+    border-radius: 0 2px 2px 0;
+  }
+  .stone-header-title {
+    font-family: var(--font-body);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: #ec8a85;
+  }
+
+  /* ── Inset field (inputs, value wells, bar tracks, search) ────────────── */
+  .stone-inset {
+    background: linear-gradient(180deg, #13141c, #0e0f16);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1px
+      rgba(255, 255, 255, 0.04);
+    border: none;
+    border-radius: 8px;
+    color: #e8e6ef;
+    transition: box-shadow 0.15s ease;
+  }
+  .stone-inset:focus {
+    outline: none;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1px
+      rgba(216, 70, 63, 0.4);
+  }
+
+  /* ── Extruded crimson button (primary / destructive-confirm) ──────────── */
+  .stone-btn-crimson {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border-radius: 10px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #fff;
+    background: linear-gradient(180deg, #e0524a, #b9322b 52%, #9a221e);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), inset 0 -2px 4px
+      rgba(0, 0, 0, 0.3), 0 3px 0 #6e1512, 0 4px 8px rgba(0, 0, 0, 0.4);
+    border: none;
+    cursor: pointer;
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  .stone-btn-crimson:hover {
+    filter: brightness(1.08);
+  }
+  .stone-btn-crimson:active {
+    transform: translateY(1px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), inset 0 -2px 4px
+      rgba(0, 0, 0, 0.3), 0 1px 0 #6e1512, 0 2px 4px rgba(0, 0, 0, 0.4);
+  }
+  .stone-btn-crimson:focus-visible {
+    outline: 2px solid oklch(var(--accent));
+    outline-offset: 2px;
+  }
+
+  /* ── Slate button (secondary) ─────────────────────────────────────────── */
+  .stone-btn-slate {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border-radius: 10px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #cdbfd2;
+    background: linear-gradient(180deg, #262a36, #171a23);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 5px
+      rgba(0, 0, 0, 0.4);
+    border: none;
+    cursor: pointer;
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  .stone-btn-slate:hover {
+    filter: brightness(1.08);
+  }
+  .stone-btn-slate:active {
+    transform: translateY(1px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px
+      rgba(0, 0, 0, 0.4);
+  }
+  .stone-btn-slate:focus-visible {
+    outline: 2px solid oklch(var(--accent));
+    outline-offset: 2px;
+  }
+
+  /* ── Emerald button (green extruded) ──────────────────────────────────── */
+  .stone-btn-emerald {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 16px;
+    height: 40px;
+    border-radius: 10px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #fff;
+    cursor: pointer;
+    border: none;
+    background: linear-gradient(180deg, #2fae6a, #1c7d4b 52%, #145a36);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -2px 5px
+      rgba(0, 0, 0, 0.3), 0 4px 0 #0e3d24, 0 6px 12px rgba(0, 0, 0, 0.45);
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  .stone-btn-emerald:active {
+    transform: translateY(2px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -2px 5px
+      rgba(0, 0, 0, 0.3), 0 2px 0 #0e3d24, 0 3px 6px rgba(0, 0, 0, 0.45);
+  }
+  .stone-btn-emerald:focus-visible {
+    outline: 2px solid oklch(var(--accent));
+    outline-offset: 2px;
+  }
+
+  /* ── Blue button (blue extruded) ──────────────────────────────────────── */
+  .stone-btn-blue {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 16px;
+    height: 40px;
+    border-radius: 10px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #fff;
+    cursor: pointer;
+    border: none;
+    background: linear-gradient(180deg, #3f7fe0, #244f9a 52%, #1a3a70);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -2px 5px
+      rgba(0, 0, 0, 0.3), 0 4px 0 #122a55, 0 6px 12px rgba(0, 0, 0, 0.45);
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  .stone-btn-blue:active {
+    transform: translateY(2px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -2px 5px
+      rgba(0, 0, 0, 0.3), 0 2px 0 #122a55, 0 3px 6px rgba(0, 0, 0, 0.45);
+  }
+  .stone-btn-blue:focus-visible {
+    outline: 2px solid oklch(var(--accent));
+    outline-offset: 2px;
+  }
+
+  /* ── Bar track & fill (XP / Blood) ────────────────────────────────────── */
+  .stone-bar-track {
+    background: linear-gradient(180deg, #13141c, #0e0f16);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+    border-radius: 8px;
+    height: 18px;
+    padding: 2px;
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .stone-bar-fill {
+    border-radius: 6px;
+    height: 100%;
+    transition: width 0.3s ease;
+  }
+  .stone-bar-fill-xp {
+    background: linear-gradient(90deg, #c79cff, #a070e0);
+  }
+  .stone-bar-fill-blood {
+    background: linear-gradient(90deg, #d8463f, #9a221e);
+  }
+  .stone-bar-label {
+    font-family: var(--font-body);
+    font-size: 10px;
+    color: #8a8090;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .stone-bar-value {
+    font-family: var(--font-display);
+    font-size: 11px;
+    color: #fff;
+    font-weight: 700;
+  }
+  /* ── Unified top bar (single continuous strip, no pseudo-elements) ──────── */
+  .stone-top-bar {
+    position: relative;
+    background: linear-gradient(180deg, #1d2230 0%, #13161f 60%, #0f121a 100%);
+    border-bottom: 1px solid rgba(216, 70, 63, 0.25);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0
+      rgba(255, 255, 255, 0.06);
+  }
+  .stone-top-bar::before,
+  .stone-top-bar::after {
+    content: none;
+  }
+
+  /* ── Nav button (compact top-bar nav) ─────────────────────────────────── */
+  .stone-nav-btn {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .stone-nav-btn:focus-visible {
+    outline: 2px solid oklch(var(--accent));
+    outline-offset: 2px;
+  }
+
+  /* ── Gem orb (vitals, big values) ─────────────────────────────────────── */
+  .stone-orb {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-family: var(--font-display);
+    font-size: 13px;
+    color: #fff;
+    /* metallic socket ring */
+    border: 3px solid transparent;
+    background: linear-gradient(160deg, #2a1e24, #120c12) padding-box,
+      linear-gradient(160deg, #5a4a52, #2a1e24) border-box;
+    box-shadow: 0 0 12px currentColor, inset 0 1px 2px rgba(255, 255, 255, 0.15);
+  }
+  .stone-orb::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at 36% 28%,
+      rgba(255, 255, 255, 0.35),
+      rgba(255, 255, 255, 0.05) 40%,
+      transparent 70%
+    );
+    mix-blend-mode: overlay;
+    pointer-events: none;
+  }
+
+  /* ── Gem / diamond marker (stat & list icons) ─────────────────────────── */
+  .stone-gem {
+    width: 14px;
+    height: 14px;
+    transform: rotate(45deg);
+    border-radius: 2px;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), inset 0 -1px 2px
+      rgba(0, 0, 0, 0.4), 0 0 5px currentColor;
+    flex-shrink: 0;
+  }
+
+  /* ── Coin orb (Doka) ──────────────────────────────────────────────────── */
+  .stone-coin {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at 35% 30%,
+      #ffe89a,
+      #f0c44a 50%,
+      #a8761a
+    );
+    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.45), 0 0 10px
+      rgba(240, 196, 74, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-family: var(--font-display);
+    font-size: 10px;
+    color: #5a3a00;
+  }
+  .stone-coin::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at 40% 35%,
+      rgba(255, 255, 255, 0.4),
+      transparent 60%
+    );
+    pointer-events: none;
+  }
+
+  /* ── Status pills ─────────────────────────────────────────────────────── */
+  .stone-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    line-height: 1.4;
+  }
+  .stone-pill-crimson {
+    background: linear-gradient(180deg, #e0524a, #b9322b 52%, #9a221e);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 2px 4px
+      rgba(0, 0, 0, 0.35);
+    color: #fff;
+  }
+  .stone-pill-gold {
+    background: linear-gradient(180deg, #2a2012, #1a140a);
+    border: 1px solid rgba(240, 196, 74, 0.45);
+    color: #f0c44a;
+  }
+  .stone-pill-green {
+    background: linear-gradient(180deg, #0f2418, #0a1a10);
+    border: 1px solid rgba(86, 209, 138, 0.45);
+    color: #56d18a;
+  }
+  .stone-pill-blue {
+    background: linear-gradient(180deg, #16202e, #101824);
+    border: 1px solid rgba(134, 196, 255, 0.45);
+    color: #86c4ff;
+  }
+  .stone-pill-purple {
+    background: linear-gradient(180deg, #1e1428, #140e1c);
+    border: 1px solid rgba(199, 156, 255, 0.45);
+    color: #c79cff;
+  }
+
+  .text-shadow {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  }
+
+  .glow {
+    box-shadow: 0 0 20px rgba(147, 51, 234, 0.3);
+  }
+
+  .glow-green {
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+  }
+
+  .glow-red {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+  }
+
+  .glow-yellow {
+    box-shadow: 0 0 20px rgba(234, 179, 8, 0.3);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #2d3748;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4a5568;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #718096;
+}
+
+/* Animation keyframes */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(147, 51, 234, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(147, 51, 234, 0.5);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUpFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Canvas specific styles */
+canvas {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  /* Prevent context menu on right click */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Touch-specific improvements */
+canvas.touch-none {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+/* Modal backdrop blur */
+.modal-backdrop {
+  backdrop-filter: blur(4px);
+}
+
+/* Responsive grid adjustments */
+@media (max-width: 768px) {
+  .dungeon-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Improve touch targets on mobile */
+  .tool-button,
+  .stone-nav-btn,
+  .stone-touch-target,
+  .stone-battle-action,
+  .stone-top-bar button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Prevent zoom on double tap without allowing canvas pan/zoom */
+  canvas:not(.touch-none) {
+    touch-action: manipulation;
+  }
+}
+
+@media (min-width: 1280px) {
+  .dungeon-grid {
+    grid-template-columns: 1fr 2fr 1fr;
+  }
+}
+
+/* Prevent text selection during drag operations */
+.select-none {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Cursor states for better UX */
+.cursor-grab {
+  cursor: grab;
+  cursor: -webkit-grab;
+}
+
+.cursor-grabbing {
+  cursor: grabbing;
+  cursor: -webkit-grabbing;
+}
+
+.cursor-crosshair {
+  cursor: crosshair;
+}
+
+/* Prevent overscroll behavior on mobile */
+html,
+body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Improve mobile viewport handling */
+@media (max-width: 768px) {
+  body {
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+  }
+}
+
+/* ── Spell icon glow styles (static, no animation) ─────────────────────── */
+.spell-glow-fire {
+  box-shadow: 0 0 6px 1px rgba(255, 100, 20, 0.45), inset 0 0 5px
+    rgba(255, 120, 20, 0.15);
+}
+.spell-glow-ice {
+  box-shadow: 0 0 6px 1px rgba(80, 160, 255, 0.45), inset 0 0 5px
+    rgba(100, 170, 255, 0.15);
+}
+.spell-glow-drain {
+  box-shadow: 0 0 6px 1px rgba(160, 40, 220, 0.45), inset 0 0 5px
+    rgba(170, 50, 230, 0.15);
+}
+.spell-glow-heal {
+  box-shadow: 0 0 6px 1px rgba(30, 200, 100, 0.45), inset 0 0 5px
+    rgba(40, 210, 110, 0.15);
+}
+.spell-glow-lightning {
+  box-shadow: 0 0 6px 1px rgba(240, 220, 40, 0.45), inset 0 0 5px
+    rgba(250, 230, 50, 0.15);
+}
+.spell-glow-poison {
+  box-shadow: 0 0 6px 1px rgba(100, 200, 30, 0.45), inset 0 0 5px
+    rgba(110, 210, 40, 0.15);
+}
+.spell-glow-shadow {
+  box-shadow: 0 0 6px 1px rgba(90, 20, 140, 0.5), inset 0 0 5px
+    rgba(100, 25, 150, 0.18);
+}
+.spell-glow-holy {
+  box-shadow: 0 0 6px 1px rgba(240, 200, 40, 0.45), inset 0 0 5px
+    rgba(250, 210, 50, 0.15);
+}
+.spell-glow-physical {
+  box-shadow: 0 0 6px 1px rgba(240, 240, 240, 0.38), inset 0 0 5px
+    rgba(250, 250, 250, 0.12);
+}
+.spell-glow-default {
+  box-shadow: 0 0 6px 1px rgba(200, 30, 30, 0.45), inset 0 0 5px
+    rgba(210, 40, 40, 0.15);
+}
+/* Paused when on cooldown */
+.spell-glow-paused {
+  opacity: 0.5;
+}
+
+@keyframes fadeOut {
+  0% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+  70% {
+    opacity: 0.9;
+    transform: translateX(-50%) scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.95);
+  }
+}
+
+/* ── Battle-specific stone utilities ───────────────────────────────────── */
+
+/* Initiative combatant chip */
+.stone-battle-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 54px;
+  cursor: pointer;
+  position: relative;
+}
+
+/* Portrait tile base */
+.stone-battle-portrait {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 800;
+  font-family: var(--font-display), "Baloo 2", sans-serif;
+  overflow: hidden;
+}
+
+/* Self (player) portrait ring */
+.stone-battle-portrait-self {
+  box-shadow: inset 0 0 0 2px rgba(216, 70, 63, 0.6), 0 0 10px
+    rgba(216, 70, 63, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Enemy portrait ring */
+.stone-battle-portrait-enemy {
+  box-shadow: inset 0 0 0 2px rgba(80, 80, 90, 0.5), 0 0 6px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* HP bar track under portrait */
+.stone-battle-hp-bar {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #0e0f16, #13141c);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+/* HP bar fill */
+.stone-battle-hp-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ff6e6e, #b81f1f);
+  box-shadow: 0 0 6px rgba(255, 50, 50, 0.45);
+  transition: width 0.3s ease;
+}
+
+/* Active turn bouncing caret */
+.stone-battle-caret {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #d8463f;
+  filter: drop-shadow(0 0 4px rgba(216, 70, 63, 0.6));
+  animation: bounceCaret 1s ease-in-out infinite;
+}
+
+@keyframes bounceCaret {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* Timer LCD well */
+.stone-timer-well {
+  background: linear-gradient(180deg, #13141c, #0e0f16);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1px
+    rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Timer digits */
+.stone-timer-digits {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 22px;
+  font-weight: 400;
+  color: #5cf08a;
+  text-shadow: 0 0 8px rgba(92, 240, 138, 0.5);
+  line-height: 1;
+}
+
+/* Spell tile */
+.stone-spell-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #1d2230, #13161f 58%, #0f121a);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), inset 0 0 0 1px
+    rgba(0, 0, 0, 0.5), 0 3px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  min-height: 62px;
+}
+
+.stone-spell-tile:hover {
+  transform: translateY(-3px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 0 1px
+    rgba(0, 0, 0, 0.5), 0 6px 14px rgba(0, 0, 0, 0.45);
+}
+
+/* Active spell tile */
+.stone-spell-tile-active {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 0 1px
+    rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(86, 209, 138, 0.6), 0 0 12px
+    rgba(86, 209, 138, 0.35);
+}
+
+/* Cooldown overlay */
+.stone-spell-tile-cooldown {
+  position: relative;
+}
+
+.stone-spell-tile-cooldown::after {
+  content: attr(data-cooldown);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Share Tech Mono", monospace;
+  font-size: 18px;
+  color: #8a8090;
+  background: rgba(15, 18, 26, 0.75);
+  backdrop-filter: blur(2px);
+  border-radius: 10px;
+}
+
+/* Spellbook tile */
+.stone-spellbook-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #e0524a, #9a221e);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1px
+    rgba(0, 0, 0, 0.4), 0 3px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  min-height: 62px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Spellbook spine edge */
+.stone-spellbook-spine {
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.25),
+    rgba(255, 255, 255, 0.05)
+  );
+  border-radius: 2px;
+}
+
+/* Spellbook center emblem line */
+.stone-spellbook-emblem {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.2);
+}
+
+/* CSS footprints for WALK button */
+.stone-footprints {
+  position: relative;
+  width: 18px;
+  height: 18px;
+}
+
+.stone-footprints::before,
+.stone-footprints::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 10px;
+  border-radius: 50% 50% 45% 45%;
+  background: rgba(205, 191, 210, 0.85);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3);
+}
+
+.stone-footprints::before {
+  transform: rotate(-18deg);
+  left: 1px;
+  top: 1px;
+}
+
+.stone-footprints::after {
+  transform: rotate(12deg);
+  right: 1px;
+  bottom: 1px;
+}
+
+/* Stat popup card */
+.stone-popup {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 248px;
+  background: linear-gradient(160deg, #5a3d45, #2a1c22 38%, #150f18);
+  border-radius: 14px;
+  padding: 2px;
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.6), inset 0 1px 0
+    rgba(255, 255, 255, 0.12);
+  z-index: 50;
+}
+
+/* Popup inner well */
+.stone-popup > .stone-popup-inner {
+  background: linear-gradient(180deg, #1d2230, #13161f 58%, #0f121a);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Popup arrow pointing down to chip */
+.stone-popup-arrow {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid #1d2230;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.4));
+}
+
+/* Pop-in animation */
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+.stone-popup-animate {
+  animation: popIn 0.2s ease-out;
+}
+
+/* ── Stat popup — portal variant (fixed-position, themed container) ─────── */
+/* Carved-stone frame matching the battle bar aesthetic: dark slate panel,
+   subtle crimson-tinted border, slight backdrop blur, deep shadow so the
+   card reads cleanly over any map color. Used for enemy + player/summon
+   inspect (rendered via createPortal to document.body). */
+.stone-popup-portal {
+  width: 248px;
+  padding: 2px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #48343c 0%, #241a20 40%, #14101a 100%);
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(216, 70, 63, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* Inner well inside the portal frame (recessed dark surface) */
+.stone-popup-portal > .stone-popup-inner {
+  background: linear-gradient(180deg, #1d2230, #13161f 58%, #0f121a);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Arrow pointing down to the anchor chip (portal variant) */
+.stone-popup-arrow-portal {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid #1d2230;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.4));
+  pointer-events: none;
+}
+
+/* Pop-in animation for the portal variant (no translateX centering —
+   the portal is fixed-position and centered via left/top math) */
+@keyframes popInPortal {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.stone-popup-portal-animate {
+  animation: popInPortal 0.2s ease-out;
+}
+
+/* Stat chip in popup grid */
+.stone-stat-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #13141c, #0e0f16);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* Buff effect chip */
+.stone-effect-chip-buff {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: linear-gradient(180deg, #16261c, #0e1812);
+  border: 1px solid rgba(86, 209, 138, 0.4);
+  color: #8be0a8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Debuff effect chip */
+.stone-effect-chip-debuff {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: linear-gradient(180deg, #2a1416, #1a0d0e);
+  border: 1px solid rgba(216, 70, 63, 0.45);
+  color: #ef8a85;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* AP cost badge (gold) */
+.stone-ap-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #ffe089, #e8b24a);
+  color: #1a1408;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-display), "Baloo 2", sans-serif;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Hotkey badge */
+.stone-hotkey-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #262a36, #171a23);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #cdbfd2;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: "Share Tech Mono", monospace;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Element frame colors for spell tiles */
+.stone-element-strike {
+  box-shadow: inset 0 0 0 1px rgba(240, 196, 74, 0.5), 0 0 8px
+    rgba(240, 196, 74, 0.2);
+}
+.stone-element-shield {
+  box-shadow: inset 0 0 0 1px rgba(134, 196, 255, 0.5), 0 0 8px
+    rgba(134, 196, 255, 0.2);
+}
+.stone-element-haste {
+  box-shadow: inset 0 0 0 1px rgba(199, 156, 255, 0.5), 0 0 8px
+    rgba(199, 156, 255, 0.2);
+}
+.stone-element-mark {
+  box-shadow: inset 0 0 0 1px rgba(255, 140, 180, 0.5), 0 0 8px
+    rgba(255, 140, 180, 0.2);
+}
+.stone-element-barrier {
+  box-shadow: inset 0 0 0 1px rgba(255, 160, 80, 0.5), 0 0 8px
+    rgba(255, 160, 80, 0.2);
+}
+.stone-element-drain {
+  box-shadow: inset 0 0 0 1px rgba(86, 209, 138, 0.5), 0 0 8px
+    rgba(86, 209, 138, 0.2);
+}
+.stone-element-chain {
+  box-shadow: inset 0 0 0 1px rgba(80, 220, 230, 0.5), 0 0 8px
+    rgba(80, 220, 230, 0.2);
+}
+.stone-element-inferno {
+  box-shadow: inset 0 0 0 1px rgba(216, 70, 63, 0.5), 0 0 8px
+    rgba(216, 70, 63, 0.2);
+}
+
+.stone-stat-chip-violet .stone-gem {
+  background: #b39cf0;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #b39cf0;
+}
+
+.stone-stat-chip-orange .stone-gem {
+  background: #f0744a;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #f0744a;
+}
+
+.stone-stat-chip-blue .stone-gem {
+  background: #5fb0f0;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #5fb0f0;
+}
+
+.stone-stat-chip-periwinkle .stone-gem {
+  background: #c0b4f0;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #c0b4f0;
+}
+
+.stone-stat-chip-lightslate .stone-gem {
+  background: #cdd6ea;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #cdd6ea;
+}
+
+.stone-stat-chip-green .stone-gem {
+  background: #8be0a8;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #8be0a8;
+}
+
+.stone-stat-chip-amber .stone-gem {
+  background: #f0a04a;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #f0a04a;
+}
+
+.stone-stat-chip-gold .stone-gem {
+  background: #f0c44a;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #f0c44a;
+}
+
+.stone-stat-chip-crimson .stone-gem {
+  background: #e85d5d;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 5px #e85d5d;
+}

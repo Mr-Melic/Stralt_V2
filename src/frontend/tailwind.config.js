@@ -1,0 +1,108 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    './index.html',
+    './src/**/*.{js,ts,jsx,tsx}',
+  ],
+  theme: {
+    extend: {
+      fontFamily: {
+        display: 'var(--font-display)',
+        body: 'var(--font-body)',
+        mono: 'var(--font-mono)',
+      },
+      colors: {
+        background: 'oklch(var(--background))',
+        foreground: 'oklch(var(--foreground))',
+        card: 'oklch(var(--card))',
+        'card-foreground': 'oklch(var(--card-foreground))',
+        popover: 'oklch(var(--popover))',
+        'popover-foreground': 'oklch(var(--popover-foreground))',
+        primary: 'oklch(var(--primary))',
+        'primary-foreground': 'oklch(var(--primary-foreground))',
+        secondary: 'oklch(var(--secondary))',
+        'secondary-foreground': 'oklch(var(--secondary-foreground))',
+        muted: 'oklch(var(--muted))',
+        'muted-foreground': 'oklch(var(--muted-foreground))',
+        accent: 'oklch(var(--accent))',
+        'accent-foreground': 'oklch(var(--accent-foreground))',
+        destructive: 'oklch(var(--destructive))',
+        'destructive-foreground': 'oklch(var(--destructive-foreground))',
+        success: 'oklch(var(--success))',
+        'success-foreground': 'oklch(var(--success-foreground))',
+        warning: 'oklch(var(--warning))',
+        'warning-foreground': 'oklch(var(--warning-foreground))',
+        border: 'oklch(var(--border))',
+        input: 'oklch(var(--input))',
+        'input-foreground': 'oklch(var(--input-foreground))',
+        ring: 'oklch(var(--ring))',
+      },
+      boxShadow: {
+        'xs': 'var(--shadow-xs)',
+        'sm': 'var(--shadow-sm)',
+        'md': 'var(--shadow-md)',
+        'lg': 'var(--shadow-lg)',
+        'gold-glow': '0 0 20px oklch(0.52 0.22 22 / 0.4), 0 0 40px oklch(0.52 0.22 22 / 0.15)',
+        'dofus-panel': '0 0 15px oklch(var(--dofus-border-gold) / 0.15), inset 0 1px 0 oklch(var(--dofus-border-gold) / 0.1)',
+        'dofus-orb': '0 0 10px currentColor, inset 0 1px 0 rgba(255, 255, 255, 0.12)',
+        'dofus-inset': 'inset 0 2px 6px rgba(0,0,0,0.6), inset 0 -1px 0 oklch(var(--dofus-border-gold) / 0.08)',
+        'stone-panel': '0 14px 34px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.10)',
+        'stone-inset': 'inset 0 1px 3px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.04)',
+        'stone-extrude': 'inset 0 1px 0 rgba(255,255,255,0.32), inset 0 -2px 4px rgba(0,0,0,0.3), 0 3px 0 #6e1512, 0 4px 8px rgba(0,0,0,0.4)',
+        'stone-glow': '0 0 12px rgba(216,70,63,0.35), inset 0 1px 0 rgba(255,255,255,0.10)',
+      },
+      keyframes: {
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        'slide-up': {
+          '0%': { opacity: '0', transform: 'translateY(4px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'pulse-glow': {
+          '0%, 100%': { boxShadow: '0 0 20px oklch(0.52 0.22 22 / 0.3)' },
+          '50%': { boxShadow: '0 0 30px oklch(0.52 0.22 22 / 0.5)' },
+        },
+        'orb-shimmer': {
+          '0%, 100%': { boxShadow: '0 0 10px currentColor, inset 0 1px 0 rgba(255, 255, 255, 0.12)' },
+          '50%': { boxShadow: '0 0 20px currentColor, inset 0 1px 0 rgba(255, 255, 255, 0.20)' },
+        },
+        'star-twinkle': {
+          '0%, 100%': { opacity: '0' },
+          '50%': { opacity: '1' },
+        },
+        'stone-pulse': {
+          '0%, 100%': { boxShadow: '0 0 12px rgba(216,70,63,0.35), inset 0 1px 0 rgba(255,255,255,0.10)' },
+          '50%': { boxShadow: '0 0 20px rgba(216,70,63,0.55), inset 0 1px 0 rgba(255,255,255,0.15)' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        'slide-up': 'slide-up 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'orb-shimmer': 'orb-shimmer 1.5s ease-in-out infinite',
+        'star-twinkle': 'star-twinkle 2s ease-in-out infinite',
+        'stone-pulse': 'stone-pulse 2s ease-in-out infinite',
+      },
+      borderRadius: {
+        'none': '0',
+        'xs': '2px',
+        'sm': '4px',
+        'md': '6px',
+        'lg': '8px',
+        'xl': '12px',
+        'full': '9999px',
+      },
+      transitionDuration: {
+        'fast': '150ms',
+        'default': '300ms',
+        'slow': '600ms',
+      },
+      transitionTimingFunction: {
+        'ease-smooth': 'cubic-bezier(0.4, 0, 0.2, 1)',
+      },
+    },
+  },
+  plugins: [],
+};

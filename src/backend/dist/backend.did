@@ -1,0 +1,848 @@
+type Value = 
+ variant {
+   "bool": bool;
+   float: float64;
+   "int": int;
+   "nat": nat;
+   "null";
+   "text": text;
+ };
+type UserRole = 
+ variant {
+   admin;
+   guest;
+   user;
+ };
+type UserProfile = 
+ record {
+   name: text;
+   uiLayout: text;
+ };
+type TierSpawnConfig = 
+ record {
+   adjacentTierPercent: float64;
+   sameTierPercent: float64;
+   threeOrMorePercent: float64;
+   tierSize: nat;
+   twoAwayPercent: float64;
+ };
+type SummonUnitDef = 
+ record {
+   damageScale: float64;
+   hpScale: float64;
+   level: nat;
+   pieceType: text;
+ };
+type SpellConfig = 
+ record {
+   aoe: bool;
+   apCost: nat;
+   cooldown: nat;
+   damage: nat;
+   description: text;
+   diagonal: bool;
+   effectCategory: text;
+   effectParams: opt text;
+   effectType: text;
+   freeCells: bool;
+   healAmount: nat;
+   hitTiles: vec record {
+                   int;
+                   int;
+                 };
+   hitsAllies: bool;
+   iconEmoji: text;
+   id: text;
+   isPhysical: bool;
+   isSummon: bool;
+   lineOfSight: bool;
+   linear: bool;
+   maxRange: nat;
+   minLevel: nat;
+   minRange: nat;
+   modifiableRange: bool;
+   mpCost: nat;
+   multiTarget: bool;
+   name: text;
+   range: nat;
+   spellType: text;
+   summonAI: text;
+   summonLifespan: nat;
+   summonUnitDef: SummonUnitDef;
+   usableByEnemy: bool;
+   usableByPlayer: bool;
+ };
+type ShopPackage = 
+ record {
+   displayOrder: nat;
+   dokaAmount: nat;
+   id: text;
+   paymentLink: text;
+   priceEuroCents: nat;
+ };
+type Result = 
+ record {
+   hasMore: bool;
+   rows: vec vec Cell;
+ };
+type RegionConfig = 
+ record {
+   backgroundColor: text;
+   battleEffects: vec BattleEffect;
+   id: text;
+   levelMax: nat;
+   levelMin: nat;
+   name: text;
+ };
+type PurchaseRecord = 
+ record {
+   customerAddress: text;
+   customerCity: text;
+   customerCountry: text;
+   customerEmail: text;
+   customerName: text;
+   customerPostal: text;
+   customerSurname: text;
+   dokaAmount: nat;
+   id: text;
+   packageId: text;
+   proofFileUrl: text;
+   status: text;
+   timestamp: int;
+   userPrincipal: principal;
+ };
+type PlayerSpriteConfig = 
+ record {
+   backUrl: opt text;
+   backWalkFrames: vec text;
+   characterPieceType: text;
+   frontUrl: opt text;
+   frontWalkFrames: vec text;
+   id: text;
+   leftUrl: opt text;
+   leftWalkFrames: vec text;
+   name: text;
+   rightUrl: opt text;
+   rightWalkFrames: vec text;
+ };
+type MapModifierConfig = 
+ record {
+   active: bool;
+   description: text;
+   id: text;
+   modifierType: text;
+   name: text;
+   triggerChance: nat;
+ };
+type LevelUpConfig = 
+ record {
+   apMpLevelThreshold: nat;
+   maxSpellRange: nat;
+   spellDmgGrowthPercent: nat;
+   spellFailBaseChance: float64;
+   spellFailReductionPerLevel: float64;
+   spellLevelingBaseCost: nat;
+   spellLevelingCostMultiplier: float64;
+   spellRangeGrowthLevels: nat;
+   statGrowthPercent: nat;
+ };
+type EnemyConfig = 
+ record {
+   ap: nat;
+   hp: nat;
+   id: text;
+   initStat: nat;
+   levelMax: nat;
+   levelMin: nat;
+   mp: nat;
+   name: text;
+   regions: vec text;
+   spriteUrl: opt text;
+ };
+type DungeonRecord = 
+ record {
+   bestRewardMultiplier: float64;
+   chainDepth: nat;
+   totalMapsCompleted: nat;
+ };
+type ChatMessage = 
+ record {
+   colorHex: text;
+   id: nat;
+   playerName: text;
+   "text": text;
+   timestampMs: int;
+ };
+type CharacterStats = 
+ record {
+   ap: nat;
+   atk: nat;
+   chc: nat;
+   evasion: nat;
+   hp: nat;
+   init: nat;
+   killCount: nat;
+   mp: nat;
+   res: nat;
+   resilience: nat;
+   sp: nat;
+   sr: nat;
+ };
+type CharacterSlots = 
+ record {
+   slot1: CharacterSlot;
+   slot2: CharacterSlot;
+   slot3: CharacterSlot;
+ };
+type CharacterSlot = opt Character;
+type Character = 
+ record {
+   activeSpells: opt vec nat;
+   bloodBalance: opt nat;
+   bossRushMasterComplete: opt bool;
+   colors: vec text;
+   covenantBuff: opt text;
+   experience: nat;
+   level: nat;
+   name: text;
+   pieceType: text;
+   pixelPattern: text;
+   rotation: nat;
+   shrineCount: opt nat;
+   spellBarOrder: opt vec text;
+   spellLevelKeys: vec text;
+   spellLevelValues: vec nat;
+   stats: CharacterStats;
+ };
+type Cell = 
+ record {
+   name: text;
+   value: Value;
+ };
+type BuffInventoryItem = 
+ record {
+   itemId: text;
+   quantity: nat;
+ };
+type BuffInventory = vec BuffInventoryItem;
+type BossStats = 
+ record {
+   ap: nat;
+   atk: nat;
+   hp: nat;
+   init: nat;
+   mp: nat;
+   res: nat;
+   sp: nat;
+ };
+type BossPhaseConfig = 
+ record {
+   hpThreshold: float64;
+   phaseNumber: nat;
+   specialAbilities: vec text;
+   spellPoolIds: vec text;
+   statMultiplier: float64;
+   summonCount: nat;
+ };
+type BossConfig = 
+ record {
+   adminNotes: text;
+   baseStats: BossStats;
+   bossMapColor: text;
+   defeated: bool;
+   id: text;
+   name: text;
+   phase1: BossPhaseConfig;
+   phase2: BossPhaseConfig;
+   pieceType: text;
+   portalColor: text;
+   rewardDokaMultiplier: float64;
+   rewardXpMultiplier: float64;
+ };
+type BattleEffect = 
+ record {
+   description: text;
+   effectType: variant {
+                 buff;
+                 damage;
+                 debuff;
+               };
+   id: text;
+   name: text;
+   value: int;
+ };
+type AdminGameConfig = 
+ record {
+   dokaSpawnBaseValue: nat;
+   dokaSpawnChance: nat;
+   leaderBoostPercent: nat;
+ };
+type AdminAuditEntry = 
+ record {
+   action: text;
+   adminPrincipal: text;
+   newSummary: text;
+   objectId: text;
+   previousSummary: text;
+   timestampNs: int;
+ };
+type AchievementProgress = 
+ record {
+   achievementId: text;
+   claimed: bool;
+   principalId: text;
+   unlocked: bool;
+   unlockedAt: int;
+ };
+type AchievementConfig = 
+ record {
+   active: bool;
+   condition: text;
+   description: text;
+   dokaReward: nat;
+   id: text;
+   name: text;
+ };
+service : {
+  _initializeAccessControl: () -> ();
+  /// Adds a new name to the pool (admin only).
+  addEnemyName: (name: text) -> ();
+  /// Admin: add Doka to any account (used by shop admin panel to manually credit Doka).
+  adminAddDoka: (userPrincipal: principal, amount: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Admin: manually credit Doka to a principal and optionally mark a purchase as completed.
+  adminAddDokaToUser: (userPrincipal: principal, dokaAmount: nat, purchaseId:
+   opt text) -> (variant {
+                   err: text;
+                   ok;
+                 });
+  /// Admin: ban a principal for non-payment.
+  /// M2: also clears achievement progress so banned players cannot double-claim
+  ///     Doka rewards after being unbanned.
+  adminBanAccount: (userPrincipal: principal) -> (variant {
+                                                    err: text;
+                                                    ok;
+                                                  });
+  /// Admin: clear a specific ad box slot (sets it back to empty/inactive).
+  adminClearAdBox: (index: nat) -> (variant {
+                                      err: text;
+                                      ok;
+                                    });
+  /// Admin: delete an achievement configuration.
+  adminDeleteAchievementConfig: (id: text) -> (variant {
+                                                 err: text;
+                                                 ok;
+                                               });
+  adminDeleteEnemyConfig: (id: text) -> (variant {
+                                           err: text;
+                                           ok;
+                                         });
+  adminDeleteMapModifier: (id: text) -> (variant {
+                                           err: text;
+                                           ok;
+                                         });
+  adminDeletePlayerSpriteConfig: (id: text) -> (variant {
+                                                  err: text;
+                                                  ok;
+                                                });
+  adminDeleteRegionConfig: (id: text) -> (variant {
+                                            err: text;
+                                            ok;
+                                          });
+  /// Admin: delete a shop package.
+  adminDeleteShopPackage: (id: text) -> (variant {
+                                           err: text;
+                                           ok;
+                                         });
+  adminDeleteSpellConfig: (id: text) -> (variant {
+                                           err: text;
+                                           ok;
+                                         });
+  /// Admin: get the Doka balance of any account.
+  adminGetDoka: (userPrincipal: principal) ->
+   (variant {
+      err: text;
+      ok: nat;
+    }) query;
+  /// Admin: get all purchase records, optionally filtered by principal text.
+  adminGetPurchaseRecords: (filterPrincipal: opt text) ->
+   (variant {
+      err: text;
+      ok: vec PurchaseRecord;
+    });
+  /// Admin: grant Doka to a principal by text ID (used by shop admin panel).
+  /// Alias for adminAddDoka; named adminGrantDoka to match the frontend's expected method name.
+  adminGrantDoka: (targetPrincipal: principal, amount: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  adminRollbackBossRushConfig: () -> (variant {
+                                        err: text;
+                                        ok;
+                                      });
+  adminRollbackColorPalette: () -> (variant {
+                                      err: text;
+                                      ok;
+                                    });
+  adminRollbackGameConfig: () -> (variant {
+                                    err: text;
+                                    ok;
+                                  });
+  adminRollbackLevelUpConfig: () -> (variant {
+                                       err: text;
+                                       ok;
+                                     });
+  adminRollbackTierSpawnConfig: () -> (variant {
+                                         err: text;
+                                         ok;
+                                       });
+  /// Admin: create or update an achievement configuration.
+  adminSetAchievementConfig: (config: AchievementConfig) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Admin: set the image URL and link URL for a specific ad box slot.
+  /// index must be 0, 1, or 2; the slot is immediately marked active.
+  adminSetAdBox: (index: nat, imageUrl: text, linkUrl: text) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  adminSetBossRushConfig: (config: text) -> (variant {
+                                               err: text;
+                                               ok;
+                                             });
+  adminSetColorPalette: (palettes: text) -> (variant {
+                                               err: text;
+                                               ok;
+                                             });
+  adminSetEnemyConfig: (config: EnemyConfig) -> (variant {
+                                                   err: text;
+                                                   ok;
+                                                 });
+  adminSetGameConfig: (config: AdminGameConfig) -> (variant {
+                                                      err: text;
+                                                      ok;
+                                                    });
+  adminSetLevelUpConfig: (config: LevelUpConfig) -> (variant {
+                                                       err: text;
+                                                       ok;
+                                                     });
+  adminSetMapModifier: (config: MapModifierConfig) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Convenience endpoint: update only the triggerChance of an existing map modifier.
+  /// Validates that chance is in the range 0–100.
+  adminSetMapModifierChance: (id: text, chance: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  adminSetPlayerSpriteConfig: (config: PlayerSpriteConfig) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  adminSetRegionConfig: (config: RegionConfig) -> (variant {
+                                                     err: text;
+                                                     ok;
+                                                   });
+  /// Admin: create or update a shop package (set payment link etc.).
+  adminSetShopPackage: (pkg: ShopPackage) -> (variant {
+                                                err: text;
+                                                ok;
+                                              });
+  adminSetSpellConfig: (config: SpellConfig) -> (variant {
+                                                   err: text;
+                                                   ok;
+                                                 });
+  adminSetTierSpawnConfig: (config: TierSpawnConfig) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Admin: unban a principal.
+  adminUnbanAccount: (userPrincipal: principal) -> (variant {
+                                                      err: text;
+                                                      ok;
+                                                    });
+  applyRewards: (slot: nat, dokaDelta: nat, xpDelta: nat) ->
+   (variant {
+      err: text;
+      ok: record {
+            newDoka: nat;
+            newLevel: nat;
+            newXp: nat;
+          };
+    });
+  assignCallerUserRole: (user: principal, role: UserRole) -> ();
+  /// Admin-only: assign a role to another principal.
+  /// M1: rate-limited — the same caller cannot change roles more than once per 30 s.
+  assignUserRole: (target: principal, role: text) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Admin: ban a player with a reason (convenience alias for adminBanAccount with reason).
+  /// Achievement progress is preserved; claimed flags block a second payout.
+  banPlayer: (userPrincipal: principal, reason: text) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Admin: ban a principal (simple alias matching the frontend's expected method name).
+  banPrincipal: (targetPrincipal: principal) -> (variant {
+                                                   err: text;
+                                                   ok;
+                                                 });
+  /// Unused public mint. Official Doka credits go through applyRewards.
+  /// Candid signature kept; the body does not award. A raw client previously
+  /// could request 8×200×1e9 Doka per call via the jackpot tier.
+  calculateAndAwardDoka: (enemies: vec record {level: nat;}) -> (nat);
+  /// Returns whether the caller's account is banned.
+  checkAccountStatus: () -> (record {isBanned: bool;}) query;
+  /// Player: claim the Doka reward for a completed achievement.
+  /// Checks: achievement must be unlocked for this player AND not already claimed.
+  /// On success, adds dokaReward to the caller's dokaBalances entry and marks as claimed.
+  claimAchievementReward: (achievementId: text) ->
+   (variant {
+      err: text;
+      ok: nat;
+    });
+  /// Called when a boss rush room is cleared. Awards Doka and XP to the character.
+  /// Room 10 (roomIndex = 9 completed → highestRoomCompleted reaches 10) sets bossRushMasterComplete.
+  completeBossRushRoom: (slot: nat, roomIndex: nat, _dokaReward: nat,
+   _xpReward: nat) -> (variant {
+                         err: text;
+                         ok;
+                       });
+  createCharacter: (slot: nat, character: Character) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Admin: delete a boss configuration by id.
+  deleteBossConfig: (id: text) -> (variant {
+                                     err: text;
+                                     ok;
+                                   });
+  /// Admin: remove a boss portal assignment.
+  deleteBossPortalAssignment: (portalId: text) -> (variant {
+                                                     err: text;
+                                                     ok;
+                                                   });
+  deleteCharacter: (slot: nat) -> (variant {
+                                     err: text;
+                                     ok;
+                                   });
+  /// Removes a name from the pool by value (admin only).
+  deleteEnemyName: (name: text) -> ();
+  /// Debug query: returns raw slot data as text for diagnosing serialization issues.
+  diagnoseCharacterSlots: () -> (text) query;
+  execute: (qJson: text) -> (Result) query;
+  /// Public: list all achievement configs (used by frontend to render the achievements panel).
+  getAchievementConfigs: () -> (vec AchievementConfig) query;
+  /// Returns all three ad box slots.  Empty/inactive slots have isActive=false.
+  getAdBoxes: () -> (vec record {
+                           text;
+                           text;
+                           bool;
+                         }) query;
+  getAdminAuditLog: () ->
+   (variant {
+      err: text;
+      ok: vec AdminAuditEntry;
+    }) query;
+  /// Public: returns all boss configs.
+  getAllBossConfigs: () -> (vec BossConfig) query;
+  getAllCharacters: () ->
+   (variant {
+      err: text;
+      ok: vec record {
+                principal;
+                CharacterSlots;
+              };
+    }) query;
+  /// Returns the current app version string.
+  getAppVersion: () -> (text) query;
+  /// Admin query: returns the list of all currently banned principals.
+  getBannedPrincipals: () -> (variant {
+                                err: text;
+                                ok: vec principal;
+                              }) query;
+  /// Public: returns a single boss config by id (null if not found).
+  getBossConfig: (id: text) -> (opt BossConfig) query;
+  /// Public: returns all (portalId, bossId) pairs for active boss portal assignments.
+  getBossPortalAssignments: () -> (vec record {
+                                         text;
+                                         text;
+                                       }) query;
+  getBossRushConfig: () -> (text) query;
+  /// Returns (currentRoom, highestRoomCompleted, totalBossRushRuns) for any player+slot.
+  getBossRushState: (userId: principal, slot: nat) -> (nat, nat, nat) query;
+  /// Public: list all available buff items (itemId, name, dokaCost).
+  getBuffCatalog: () -> (vec record {
+                               text;
+                               text;
+                               nat;
+                             }) query;
+  /// Retrieve a character slot's buff inventory.
+  getBuffInventory: (slot: nat) ->
+   (variant {
+      err: text;
+      ok: BuffInventory;
+    }) query;
+  /// Public query: returns the Doka balance for the caller (H1, H5).
+  getCallerDokaBalance: () -> (nat) query;
+  getCallerUserProfile: () -> (opt UserProfile) query;
+  getCallerUserRole: () -> (UserRole) query;
+  /// Returns the changelog text for a given version (null if not set).
+  getChangelog: (version: text) -> (opt text) query;
+  /// Returns the version string of the changelog the given user has already seen.
+  /// Empty string means the user has not seen any changelog yet.
+  getChangelogShownVersion: (user: principal) -> (text) query;
+  getCharacter: (slot: nat) -> (CharacterSlot) query;
+  getCharacterSlots: () -> (CharacterSlots) query;
+  /// Retrieve the full Character record for a given slot.
+  getCharacterStats: (slot: nat) ->
+   (variant {
+      err: text;
+      ok: Character;
+    }) query;
+  getColorPalette: () -> (text) query;
+  /// Returns the caller's current Doka balance.
+  getDokaBalance: () -> (nat) query;
+  /// Returns a player's current dungeon chain record (null if never entered a dungeon).
+  getDungeonRecord: ("principal": principal) -> (opt DungeonRecord) query;
+  getEnemyConfigs: () -> (vec EnemyConfig) query;
+  /// Compute the base HP for an enemy of the given tier at the given player level,
+  /// using the admin-configurable stat growth percent as the scaling factor.
+  /// Formula: baseHP * (1 + (level * scalingFactor))
+  /// where scalingFactor = levelUpConfig.statGrowthPercent / 100.0
+  /// and baseHP is determined by tier: tier 1 = 30, +20 per additional tier.
+  getEnemyHPForLevel: (enemyTier: nat, level: nat) -> (nat) query;
+  /// Returns the current list of admin-managed enemy names.
+  /// When the stored list is empty the canonical ancient names default list
+  /// is returned so enemies are never named “AncientOne” by fallback.
+  getEnemyNames: () -> (vec text) query;
+  getGameConfig: () -> (AdminGameConfig) query;
+  getLeaderboard: () ->
+   (vec
+     record {
+       achievementsCompleted: nat;
+       killCount: nat;
+       level: nat;
+       playerName: text;
+       principalId: text;
+     }) query;
+  getLevelUpConfig: () -> (LevelUpConfig) query;
+  getMapModifiers: () -> (vec MapModifierConfig) query;
+  /// Returns all current chat messages (oldest first).
+  getMessages: () -> (vec ChatMessage) query;
+  /// Returns the caller's purchase history.
+  getMyPurchaseHistory: () -> (vec PurchaseRecord) query;
+  /// Public: return the achievement progress records for the given principal.
+  getPlayerAchievements: (player: principal) ->
+   (vec AchievementProgress) query;
+  getPlayerSpriteConfigs: () -> (vec PlayerSpriteConfig) query;
+  /// Public: returns all purchase records (admin-only; use adminGetPurchaseRecords for filtered access).
+  getPurchases: () -> (variant {
+                         err: text;
+                         ok: vec PurchaseRecord;
+                       }) query;
+  getRegionConfigs: () -> (vec RegionConfig) query;
+  /// Query the persisted session state for a character slot.
+  /// Returns null values for any field not yet set (legacy characters).
+  getSessionState: (slot: nat) ->
+   (variant {
+      err: text;
+      ok:
+       record {
+         activeSpells: vec nat;
+         bloodBalance: nat;
+         covenantBuff: text;
+         shrineCount: nat;
+       };
+    }) query;
+  /// Public: list all shop packages sorted by displayOrder.
+  getShopPackages: () -> (vec ShopPackage) query;
+  /// Public: returns all (dokaAmount, paymentLink) pairs.
+  getShopPaymentLinks: () -> (vec record {
+                                    nat;
+                                    text;
+                                  }) query;
+  getSpellConfigs: () -> (vec SpellConfig) query;
+  getTierSpawnConfig: () -> (TierSpawnConfig) query;
+  getUserProfile: (user: principal) -> (opt UserProfile) query;
+  /// Returns "admin" if the caller has admin permission, otherwise "user".
+  /// Triggers first-login admin auto-assignment: the very first principal
+  /// to call this becomes admin.
+  getUserRole: () -> (text);
+  /// Load the caller's panel-layout blob. Returns the empty string if the
+  /// caller has no UserProfile yet or if uiLayout was never set.
+  getUserUiLayout: () -> (text) query;
+  /// Seed the names list on first call if it is empty. Admin-only — same
+  /// privilege as addEnemyName / deleteEnemyName so a non-admin client
+  /// cannot mutate the pool by calling this directly.
+  initDefaultNames: () -> ();
+  /// Player initiates a purchase — creates a pending record.
+  /// Returns the purchase id so the frontend can track it.
+  /// H5: Accepts all customer fields including proofFileUrl.
+  initiatePurchase: (packageId: text, customerName: text, customerSurname:
+   text, customerEmail: text, customerAddress: text, customerCity: text,
+   customerCountry: text, customerPostal: text, proofFileUrl: text) ->
+   (variant {
+      err: text;
+      ok: text;
+    });
+  isCallerAdmin: () -> (bool) query;
+  /// Public query: returns whether a given principal is banned.
+  isPlayerBanned: (userPrincipal: principal) -> (bool) query;
+  /// Player: mark an achievement as unlocked (called by the frontend when the condition is met).
+  /// Idempotent — calling again on an already-unlocked achievement is a no-op.
+  markAchievementUnlocked: (achievementId: text) -> (variant {
+                                                       err: text;
+                                                       ok;
+                                                     });
+  /// Called by the frontend after the player dismisses the changelog popup.
+  /// Records that the caller has seen the changelog for the given version.
+  markChangelogShown: (version: text) -> ();
+  /// Player calls this to trigger auto-completion of their pending purchases.
+  processPendingPurchases: () -> (nat);
+  /// Purchase a buff item. Deducts Doka from caller's per-principal balance.
+  purchaseBuff: (slot: nat, itemId: text) ->
+   (variant {
+      err: text;
+      ok: BuffInventory;
+    });
+  /// Rename a character in the given slot. Costs 100 Doka from the character's balance.
+  renameCharacter: (slot: nat, newName: text) -> (variant {
+                                                    err: text;
+                                                    ok;
+                                                  });
+  /// Called on player death or boss rush abort. Resets currentRoom to 0.
+  resetBossRush: (slot: nat) -> ();
+  /// Reset a player's dungeon chain (called on death or chain completion).
+  resetDungeonChain: ("principal": principal) -> ();
+  /// Save the active spell loadout (up to 8 spell IDs) for a character slot.
+  /// Replaces localStorage so spell loadouts persist across devices and browser clears.
+  saveActiveSpells: (slot: nat, spells: vec nat) -> (variant {
+                                                       err: text;
+                                                       ok;
+                                                     });
+  /// Save all battle-relevant stats back to a character slot after a battle.
+  /// hp may arrive as negative (character was knocked out); it is clamped to 0 before storage.
+  /// C1: dokaBalance is stored on the per-principal dokaBalances map (the
+  ///     Character record no longer carries a wallet field). This write may
+  ///     decrease Doka/XP (heal, shop, death) but must not mint — credits
+  ///     go through applyRewards / claim / shop-complete / upgradeSpell.
+  /// Incoming Doka/XP above the stored values are ignored. Level is owned
+  /// by applyRewards — the client level argument is ignored.
+  saveBattleStats: (slot: nat, _level: nat, xp: nat, hp: int, _maxHp: 
+   nat, _ap: nat, maxAp: nat, _mp: nat, maxMp: nat, attack: nat, defense:
+   nat, initiative: nat, dokaBalance: nat, _spellLevelKeys: vec text,
+   _spellLevelValues: vec nat) -> (variant {
+                                     err: text;
+                                     ok;
+                                   });
+  saveCallerUserProfile: (profile: UserProfile) -> ();
+  saveKillCount: (slot: nat, kills: nat) -> (variant {
+                                               err: text;
+                                               ok;
+                                             });
+  /// Save the caller's full panel-layout blob (one compact JSON Text field).
+  /// Single save endpoint for the layout — no per-panel records.
+  /// Validates the caller is not anonymous. Reads the existing UserProfile,
+  /// updates only uiLayout, and writes it back to the userProfiles Map.
+  saveUserUiLayout: (layout: text) -> (variant {
+                                         err: text;
+                                         ok;
+                                       });
+  schema: () -> (text) query;
+  /// Append a new message; trims list to at most 200 entries (oldest dropped).
+  sendMessage: (_playerName: text, "text": text, colorHex: text) -> ();
+  /// Admin-only: sets the current app version string.
+  setAppVersion: (version: text) -> (variant {
+                                       err: text;
+                                       ok;
+                                     });
+  /// Admin: create or update a boss configuration.
+  setBossConfig: (config: BossConfig) -> (variant {
+                                            err: text;
+                                            ok;
+                                          });
+  /// Admin: assign a boss to a portal (or overwrite an existing assignment).
+  setBossPortalAssignment: (portalId: text, bossId: text) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Called when the player enters a boss rush room. Records the current room index.
+  setBossRushProgress: (slot: nat, currentRoom: nat) -> ();
+  /// Admin-only: sets the changelog text for a given version.
+  setChangelog: (version: text, "text": text) -> (variant {
+                                                    err: text;
+                                                    ok;
+                                                  });
+  /// Admin: set the payment URL for a specific shop package by dokaAmount.
+  setShopPaymentLink: (dokaAmount: nat, url: text) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Set the player-arranged spell bar order for the character in the given slot.
+  /// FILTERS out any id not owned by the character (not in spellLevelKeys) and
+  /// persists the remaining ids into spellBarOrder. The spell bar is a UI
+  /// preference, not an authorization surface, so unknown ids are dropped
+  /// rather than rejecting the whole save. Keeps the slot 1-3 guard and the
+  /// max-8 cap as structural validation.
+  setSpellBarOrder: (slot: nat, spellIds: vec text) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Admin: unban a player account.
+  unbanPlayer: (userPrincipal: principal) -> (variant {
+                                                err: text;
+                                                ok;
+                                              });
+  /// Admin: unban a principal (simple alias matching the frontend's expected method name).
+  unbanPrincipal: (targetPrincipal: principal) -> (variant {
+                                                     err: text;
+                                                     ok;
+                                                   });
+  updateCharacter: (slot: nat, character: Character) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Update a player's dungeon progress (called by the frontend on each map completion).
+  updateDungeonProgress: ("principal": principal, depth: nat) -> ();
+  /// Update the session state fields (bloodBalance, covenantBuff, shrineCount)
+  /// for a character slot. Replaces localStorage for cross-device persistence.
+  updateSessionState: (slot: nat, bloodBalance: nat, covenantBuff: text,
+   shrineCount: nat) -> (variant {
+                           err: text;
+                           ok;
+                         });
+  /// Upgrade a spell for the character in the given slot.
+  /// Cost = baseCost * 2^currentSpellLevel (all in Doka from character's dokaBalance).
+  /// Returns the new spell level on success.
+  upgradeSpell: (slot: nat, spellId: text) -> (variant {
+                                                 err: text;
+                                                 ok: nat;
+                                               });
+  /// Use one of a buff item (removes one from inventory).
+  useBuffItem: (slot: nat, itemId: text) ->
+   (variant {
+      err: text;
+      ok: BuffInventory;
+    });
+}

@@ -1,0 +1,60 @@
+type UserRole = 
+ variant {
+   admin;
+   guest;
+   user;
+ };
+type UserProfile = record {name: text;};
+type CharacterStats = 
+ record {
+   ap: nat;
+   atk: nat;
+   chc: nat;
+   evasion: nat;
+   hp: nat;
+   init: nat;
+   mp: nat;
+   res: nat;
+   resilience: nat;
+   scp: nat;
+   sp: nat;
+   sr: nat;
+   wp: nat;
+   wr: nat;
+ };
+type CharacterSlots = 
+ record {
+   slot1: CharacterSlot;
+   slot2: CharacterSlot;
+   slot3: CharacterSlot;
+ };
+type CharacterSlot = opt Character;
+type Character = 
+ record {
+   colors: vec text;
+   experience: nat;
+   level: nat;
+   name: text;
+   pieceType: text;
+   pixelPattern: text;
+   rotation: nat;
+   stats: CharacterStats;
+ };
+service : {
+  assignCallerUserRole: (user: principal, role: UserRole) -> ();
+  createCharacter: (slot: nat, character: Character) -> ();
+  deleteCharacter: (slot: nat) -> ();
+  getAllCharacters: () -> (vec record {
+                                 principal;
+                                 CharacterSlots;
+                               }) query;
+  getCallerUserProfile: () -> (opt UserProfile) query;
+  getCallerUserRole: () -> (UserRole) query;
+  getCharacter: (slot: nat) -> (CharacterSlot) query;
+  getCharacterSlots: () -> (CharacterSlots) query;
+  getUserProfile: (user: principal) -> (opt UserProfile) query;
+  initializeAccessControl: () -> ();
+  isCallerAdmin: () -> (bool) query;
+  saveCallerUserProfile: (profile: UserProfile) -> ();
+  updateCharacter: (slot: nat, character: Character) -> ();
+}

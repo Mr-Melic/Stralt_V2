@@ -1,0 +1,39 @@
+[package]
+name = "backend"
+version = "0.1.0"
+
+[build]
+outputDir = "src/backend/dist"
+args = [ "--release" ]
+check-wasm = true
+check-deploy = true
+
+[canisters.backend]
+main = "src/backend/main.mo"
+
+[canisters.backend.check-stable]
+path = ".old/src/backend/dist/backend.most"
+
+[canisters.backend.migrations]
+chain = "src/backend/migrations"
+# Include empty-canister genesis (20260826) through the latest pending file so
+# `mops check` / Caffeine import compares an empty previous against OldActor = {}
+# rather than treating 20260827's populated legacy shape as the chain start.
+check-limit = 3
+
+[toolchain]
+moc = "1.11.2"
+lintoko = "0.11.0"
+
+[lint]
+extends = true
+
+[moc]
+args = [ "-E=M0236,M0235,M0223,M0237", "-W=M0254", "-A=M0198", "--default-persistent-actors", "--implicit-package=core", "-no-check-ir" ]
+
+[dependencies]
+core = "2.6.1"
+base = "0.16.0"
+caffeineai-authorization = "0.1.1"
+caffeineai-oql = "0.4.0"
+ic = "4.2.0"

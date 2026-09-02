@@ -1,0 +1,21 @@
+[dependencies]
+base = "0.16.0"
+core = "2.6.0"
+caffeineai-authorization = "0.1.1"
+caffeineai-oql = "0.4.0"
+
+[tools]
+moc = "1.9.0"
+
+[package]
+name = "backend"
+version = "0.1.0"
+
+[canisters.backend]
+path = "src/backend/main.mo"
+
+[canisters.backend.check-stable]
+path = ".old/src/backend/dist/backend.most"
+
+[toolchain]
+moc = "1.9.0"

@@ -1,0 +1,25 @@
+# Mirrors the Caffeine GitHub → import frontend gate in src/frontend/caffeine.toml [check]:
+#   pnpm typecheck && pnpm check   # biome check src
+# Backend Motoko is `caffeine check` / `mops check` (not duplicated here).
+name: Caffeine import gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck and Biome (Caffeine frontend [check])
+        run: pnpm typecheck && pnpm check

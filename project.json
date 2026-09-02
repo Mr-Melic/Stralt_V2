@@ -1,0 +1,18 @@
+{
+  "overview": "ÆSTRALTØ is a modular isometric tile-based tactics RPG with turn-based combat, boss fights, a Boss Rush mode, dungeon chains, and a persistent character loadout.",
+  "features": [
+    "Turn-based isometric tactics combat with spells and summons",
+    "Boss fights with mid-combat minion spawning",
+    "Boss Rush and dungeon-chain progression modes",
+    "Persistent character loadout with a customizable spell bar",
+    "Backend-authoritative Doka currency and XP with battle recaps"
+  ],
+  "category": "game",
+  "tags": [
+    "rpg",
+    "tactics",
+    "isometric",
+    "combat"
+  ],
+  "last_updated": "2026-08-27T01:09:38.463Z"
+}
