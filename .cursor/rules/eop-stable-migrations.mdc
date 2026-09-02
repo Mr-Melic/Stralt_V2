@@ -53,7 +53,7 @@ Consequences:
 - Never put a new stable on a chain file at or **before** the deployed position
   (`20260831_000000` carries no GameKey; GameKey is `20260901_000000`).
 - Never delete or rename a chain file whose name a canister recorded
-  (`20260803_185500`, `20260827_000000`, `20260831_000000`, `20260901_000000`).
+  (`20260803_185500`, `20260826_000000`, `20260827_000000`, `20260831_000000`, `20260901_000000`).
   A `public func migration(_ : {}) : {} { {} }` no-op keeps the name.
 - Never change a frozen `NewActor` (through `20260901_000000`).
 - The genesis file must sort before every recorded name: `20260801_000000.mo`,
