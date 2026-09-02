@@ -199,7 +199,8 @@ describe("gameKeyMailtoHref", () => {
     const code = `A${"&".repeat(1)}${"B".repeat(118)}`;
     assert.equal(code.length, GAME_KEY_LENGTH);
     const href = gameKeyMailtoHref("ada@example.com", code);
-    assert.match(href, /^mailto:ada@example.com\?/);
+    // PR #322 encodes the recipient so stored @ cannot break the mailto URL.
+    assert.match(href, /^mailto:ada%40example.com\?/);
     const body = new URL(href).searchParams.get("body") ?? "";
     assert.equal(body.includes(code), true);
     assert.equal(href.includes(`body=${code}`), false);
