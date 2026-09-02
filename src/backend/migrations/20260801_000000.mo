@@ -18,8 +18,10 @@ module {
   // collided with the 37 legacy fields already in memory (RTS error:
   // Memory-incompatible program upgrade, reproduced on PocketIC). Sorting
   // before 20260803_185500 keeps it skipped on every populated canister and
-  // still first on an empty one. Must stay first in lex order and must never
-  // become the OldActor of a populated upgrade.
+  // still first on an empty one. Stralt_V2 (ozvtz-4aaaa-aaaai-av4yq-cai)
+  // recorded the old name on its first deploy — keep `20260826_000000.mo`
+  // as a name-only no-op so that canister still matches. Must stay first in
+  // lex order and must never become the OldActor of a populated upgrade.
 
   // ─── Inlined types (must match 20260827 OldActor; no project imports) ──
 

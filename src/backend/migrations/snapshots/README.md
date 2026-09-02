@@ -18,6 +18,9 @@ committed an `.old` with GameKey and Caffeine still reported M0263 for GameKey;
 For this project that build is the 2026-08-31 import (PR #181 merge `f8aa05e`):
 chain `20260826/20260827/20260831`, 42 stables, no GameKey. `.old` in the repo is
 a byte-identical copy so `mops check` here behaves exactly like Caffeine's.
+Stralt_V2's first Caffeine wasm (`9bf8368`, canister `ozvtz-4aaaa-aaaai-av4yq-cai`)
+is that same signature, so `20260826_000000` must remain a chain file (name-only
+no-op after genesis moved to `20260801`).
 
 ## How moc decides whether an upgrade is compatible
 

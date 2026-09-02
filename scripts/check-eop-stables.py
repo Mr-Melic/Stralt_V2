@@ -80,6 +80,11 @@ FROZEN_THROUGH = "20260901_000000"
 # record. Each must stay a chain file.
 DEPLOYED_TAILS = {
     "20260803_185500": "cwofb-yqaaa-aaaap-qp45q-cai at Caffeine build #347/#348",
+    "20260826_000000": (
+        "Stralt_V2 first Caffeine export (9bf8368) / 2026-08-31 import genesis "
+        "name — ozvtz-4aaaa-aaaai-av4yq-cai records this name; deleting it "
+        "falls back to {} and traps IC0503"
+    ),
     "20260827_000000": "cwofb-yqaaa-aaaap-qp45q-cai at Caffeine build #354",
     "20260831_000000": (
         "Caffeine's recorded previous version for this project: the 2026-08-31 "
