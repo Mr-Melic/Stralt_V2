@@ -405,70 +405,47 @@ module {
     };
   };
 
-  // Annotate empties here. Inside `take(...)` moc cannot pick K/V for
-  // `Map.empty()` (M0098: no best choice for type parameters).
-  let emptyUserProfiles : Map.Map<Principal, UserProfile> = Map.empty<Principal, UserProfile>();
-  let emptyCharacterSlots : Map.Map<Principal, CharacterSlots> = Map.empty<Principal, CharacterSlots>();
-  let emptyEnemyConfigs : Map.Map<Text, EnemyConfig> = Map.empty<Text, EnemyConfig>();
-  let emptyRegionConfigs : Map.Map<Text, RegionConfig> = Map.empty<Text, RegionConfig>();
-  let emptyPlayerSpriteConfigs : Map.Map<Text, PlayerSpriteConfig> = Map.empty<Text, PlayerSpriteConfig>();
-  let emptySpellConfigs : Map.Map<Text, SpellConfig> = Map.empty<Text, SpellConfig>();
-  let emptyMapModifierConfigs : Map.Map<Text, MapModifierConfig> = Map.empty<Text, MapModifierConfig>();
-  let emptyRoleChangeTimestamps : Map.Map<Text, Int> = Map.empty<Text, Int>();
-  let emptyShopPackages : Map.Map<Text, ShopPackage> = Map.empty<Text, ShopPackage>();
-  let emptyAchievementConfigs : Map.Map<Text, AchievementConfig> = Map.empty<Text, AchievementConfig>();
-  let emptyAchievementProgress : Map.Map<Text, AchievementProgress> = Map.empty<Text, AchievementProgress>();
-  let emptyPurchaseRecords : Map.Map<Text, PurchaseRecord> = Map.empty<Text, PurchaseRecord>();
-  let emptyBannedPrincipals : Map.Map<Text, Bool> = Map.empty<Text, Bool>();
-  let emptyChangelogs : Map.Map<Text, Text> = Map.empty<Text, Text>();
-  let emptyChangelogShownVersions : Map.Map<Principal, Text> = Map.empty<Principal, Text>();
-  let emptyBuffInventories : Map.Map<Text, BuffInventory> = Map.empty<Text, BuffInventory>();
-  let emptyDungeonRecords : Map.Map<Principal, DungeonRecord> = Map.empty<Principal, DungeonRecord>();
-  let emptyBossConfigs : Map.Map<Text, BossConfig> = Map.empty<Text, BossConfig>();
-  let emptyBossPortalAssignments : Map.Map<Text, Text> = Map.empty<Text, Text>();
-  let emptyDokaBalances : Map.Map<Principal, Nat> = Map.empty<Principal, Nat>();
-  let emptyBossRushStates : Map.Map<Text, BossRushState> = Map.empty<Text, BossRushState>();
-  let emptyEnemyNames : List.List<Text> = List.empty<Text>();
-  let emptyChatMessages : List.List<ChatMessage> = List.empty<ChatMessage>();
-
+  // Map.empty / List.empty are non-static (M0014) if bound at module scope
+  // in a migration module. Call them only inside `migration`, with explicit
+  // K/V so moc does not hit M0098.
   public func migration(old : OldActor) : NewActor {
     {
       accessControlState = take(old.accessControlState, AccessControl.initState());
-      userProfiles = take(old.userProfiles, emptyUserProfiles);
-      characterSlots = take(old.characterSlots, emptyCharacterSlots);
-      enemyConfigs = take(old.enemyConfigs, emptyEnemyConfigs);
-      regionConfigs = take(old.regionConfigs, emptyRegionConfigs);
-      playerSpriteConfigs = take(old.playerSpriteConfigs, emptyPlayerSpriteConfigs);
+      userProfiles = take(old.userProfiles, Map.empty<Principal, UserProfile>());
+      characterSlots = take(old.characterSlots, Map.empty<Principal, CharacterSlots>());
+      enemyConfigs = take(old.enemyConfigs, Map.empty<Text, EnemyConfig>());
+      regionConfigs = take(old.regionConfigs, Map.empty<Text, RegionConfig>());
+      playerSpriteConfigs = take(old.playerSpriteConfigs, Map.empty<Text, PlayerSpriteConfig>());
       var levelUpConfig = take(old.levelUpConfig, emptyLevelUp);
-      spellConfigs = take(old.spellConfigs, emptySpellConfigs);
-      mapModifierConfigs = take(old.mapModifierConfigs, emptyMapModifierConfigs);
-      roleChangeTimestamps = take(old.roleChangeTimestamps, emptyRoleChangeTimestamps);
-      shopPackages = take(old.shopPackages, emptyShopPackages);
-      achievementConfigs = take(old.achievementConfigs, emptyAchievementConfigs);
-      achievementProgress = take(old.achievementProgress, emptyAchievementProgress);
-      purchaseRecords = take(old.purchaseRecords, emptyPurchaseRecords);
+      spellConfigs = take(old.spellConfigs, Map.empty<Text, SpellConfig>());
+      mapModifierConfigs = take(old.mapModifierConfigs, Map.empty<Text, MapModifierConfig>());
+      roleChangeTimestamps = take(old.roleChangeTimestamps, Map.empty<Text, Int>());
+      shopPackages = take(old.shopPackages, Map.empty<Text, ShopPackage>());
+      achievementConfigs = take(old.achievementConfigs, Map.empty<Text, AchievementConfig>());
+      achievementProgress = take(old.achievementProgress, Map.empty<Text, AchievementProgress>());
+      purchaseRecords = take(old.purchaseRecords, Map.empty<Text, PurchaseRecord>());
       var nextPurchaseId = take(old.nextPurchaseId, 0);
-      bannedPrincipals = take(old.bannedPrincipals, emptyBannedPrincipals);
+      bannedPrincipals = take(old.bannedPrincipals, Map.empty<Text, Bool>());
       var gameConfig = take(old.gameConfig, emptyGame);
       var tierSpawnConfig = take(old.tierSpawnConfig, emptyTierSpawn);
       var colorPaletteStore = take(old.colorPaletteStore, "");
       var bossRushConfigStore = take(old.bossRushConfigStore, "");
       var appVersion = take(old.appVersion, "");
-      changelogs = take(old.changelogs, emptyChangelogs);
-      changelogShownVersions = take(old.changelogShownVersions, emptyChangelogShownVersions);
-      buffInventories = take(old.buffInventories, emptyBuffInventories);
-      dungeonRecords = take(old.dungeonRecords, emptyDungeonRecords);
-      bossConfigs = take(old.bossConfigs, emptyBossConfigs);
-      bossPortalAssignments = take(old.bossPortalAssignments, emptyBossPortalAssignments);
-      dokaBalances = take(old.dokaBalances, emptyDokaBalances);
-      bossRushStates = take(old.bossRushStates, emptyBossRushStates);
-      var enemyNames = take(old.enemyNames, emptyEnemyNames);
+      changelogs = take(old.changelogs, Map.empty<Text, Text>());
+      changelogShownVersions = take(old.changelogShownVersions, Map.empty<Principal, Text>());
+      buffInventories = take(old.buffInventories, Map.empty<Text, BuffInventory>());
+      dungeonRecords = take(old.dungeonRecords, Map.empty<Principal, DungeonRecord>());
+      bossConfigs = take(old.bossConfigs, Map.empty<Text, BossConfig>());
+      bossPortalAssignments = take(old.bossPortalAssignments, Map.empty<Text, Text>());
+      dokaBalances = take(old.dokaBalances, Map.empty<Principal, Nat>());
+      bossRushStates = take(old.bossRushStates, Map.empty<Text, BossRushState>());
+      var enemyNames = take(old.enemyNames, List.empty<Text>());
       var enemyNamesInitialised = take(old.enemyNamesInitialised, false);
       var adBoxes = take(old.adBoxes, [] : [(Text, Text, Bool)]);
       BUFF_CATALOG = take(old.BUFF_CATALOG, [] : [(Text, Text, Nat)]);
       DEFAULT_ENEMY_NAMES = take(old.DEFAULT_ENEMY_NAMES, [] : [Text]);
       ROLE_CHANGE_MIN_NS = take(old.ROLE_CHANGE_MIN_NS, 0);
-      var chatMessages = take(old.chatMessages, emptyChatMessages);
+      var chatMessages = take(old.chatMessages, List.empty<ChatMessage>());
       var nextChatId = take(old.nextChatId, 0);
     };
   };
